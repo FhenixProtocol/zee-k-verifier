@@ -90,6 +90,15 @@ rand = "=0.8.6"
 # OTLP push pipeline (metrics.mode = "otlp"). The 0.31 line matches the
 # opentelemetry graph google-cloud-* already resolves; http-proto only, and the
 # exporter always receives our own client, so no reqwest feature is pulled.
+#
+# We keep 0.31 on purpose. A move to 0.32 removes metrics-exporter-otel.
+# That crate uses 0.31. Its `Meter` type does not match a 0.32 provider.
+# No bridge crate on crates.io supports 0.32 yet. Thus a move to 0.32 puts
+# a copy of the bridge in this repo.
+# The 0.32.1 release repairs baggage parsing. That fix does not apply here.
+# This crate does not install a propagator. It does not read baggage.
+# The code compiles, but nothing calls it.
+# Move to 0.32 when a bridge supports it.
 opentelemetry = "=0.31.0"
 opentelemetry_sdk = { version = "=0.31.0", default-features = false, features = ["metrics", "internal-logs"] }
 opentelemetry-otlp = { version = "=0.31.0", default-features = false, features = ["http-proto", "internal-logs"] }
