@@ -1,0 +1,7 @@
+/target
+**/.terraform/
+**/terraform.tfvars
+*.tfstate
+*.tfstate.backup
+/signer-pk.bin
+# cosign.key / cosign.pub — removed with Cosign (PR #26); kept as a marker

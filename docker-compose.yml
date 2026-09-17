@@ -1,0 +1,78 @@
+# Local dev stack for zk-verifier.
+#
+# For the production TDX deployment see the gitops repo;
+#
+# Defaults (override via env vars):
+#   CONFIG_DIR  ./config/local         -> mounted at /app/config
+#   KEYS_PATH   ./config/keys/dev      -> mounted at /app/keys
+#   FEATURES    mock                   -> build with mock signer + mock keys
+
+name: zk-verifier-dev
+
+volumes:
+  fake-gcs-server-data:
+
+x-configs-volume-template: &configs-volume-template
+  type: bind
+  source: ${CONFIG_DIR:-./config/local}
+  target: /app/config
+  bind:
+    selinux: "z"
+
+x-keys-volume-template: &keys-volume-template
+  type: bind
+  source: ${KEYS_PATH:-./config/keys/dev}
+  target: /app/keys
+  bind:
+    selinux: "z"
+
+services:
+  zk-verifier:
+    build:
+      context: .
+      dockerfile: zk-verifier/Dockerfile
+      args:
+        FEATURES: ${FEATURES:-mock}
+    environment:
+      - RUST_LOG=${RUST_LOG:-debug}
+      # Point google-cloud-auth's MDS path at the mock metadata service so the
+      # same ADC code path works in dev as in prod. fake-gcs-server ignores
+      # the token contents.
+      - GCE_METADATA_HOST=mock-gce-metadata:8080
+    ports:
+      - "3001:3001"
+      - "9090:9090"
+    restart: unless-stopped
+    volumes:
+      - *configs-volume-template
+      - *keys-volume-template
+    depends_on:
+      fake-gcs-server:
+        condition: service_started
+      mock-gce-metadata:
+        condition: service_started
+
+  mock-gce-metadata:
+    image: python:3-alpine
+    command: python /mock/server.py
+    volumes:
+      - ./docker/mock-gce-metadata:/mock:ro
+    ports:
+      - "8080:8080"
+
+  fake-gcs-server:
+    image: fsouza/fake-gcs-server:latest
+    command: -scheme http -public-host 0.0.0.0
+    ports:
+      - "4443:4443"
+    volumes:
+      - fake-gcs-server-data:/storage/
+    depends_on:
+      - fake-gcs-server-data-init
+
+  fake-gcs-server-data-init:
+    image: busybox:latest
+    command: mkdir -p /storage/cofhe_verified_inputs_dev
+    volumes:
+      - fake-gcs-server-data:/storage/
+    restart: "no"

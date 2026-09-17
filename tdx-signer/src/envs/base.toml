@@ -1,0 +1,35 @@
+# Baked runtime config — shared BASE for the Confidential VM. The per-env files in
+# this dir (staging.toml / testnet.toml / mainnet.toml) are OVERLAYS: they carry
+# only the fields that differ for their environment and are layered on top of this
+# base (later wins; unset keys fall through). Embedded via include_str! (part of
+# the attested image digest) and written to tmpfs at boot — NOT fetched from GCS.
+#
+# store_cts.endpoint is injected from the STORE_CTS_ENDPOINT env at boot (the one
+# operator-supplied value, mirroring teecryptor's CT_SOURCE_URL); the placeholder
+# below is always overwritten. storage.bucket is the only per-env difference today,
+# so it lives in the overlays, not here.
+
+[server]
+bind_address = "0.0.0.0"
+bind_port    = 3001
+# The exposition port. Not scraped: reachable only over an IAP tunnel, as the
+# debug view for when a push looks wrong (see compute/main.tf).
+metrics_port = 9090
+
+[keys]
+crs_path           = "/app/keys/crs"
+pk_path            = "/app/keys/public_key"
+sk_path            = "/app/keys/computation_key"
+signer_pk_path     = "/app/keys/signer_pk"
+signer_pubkey_path = "/app/keys/signer_public_key"
+
+[store_cts]
+# Placeholder — overridden at boot by STORE_CTS_ENDPOINT (required). If this value
+# survives into the running config, the env override was not applied.
+endpoint = "SET_VIA_STORE_CTS_ENDPOINT"
+
+[storage]
+backend             = "gcs"
+retry_config        = { max_retries = 5, initial_delay_ms = 100, max_delay_ms = 5000 }
+upload_timeout_secs = 300
+storage_endpoint    = "https://storage.googleapis.com"

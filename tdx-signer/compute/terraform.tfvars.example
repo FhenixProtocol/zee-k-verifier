@@ -1,0 +1,142 @@
+# zee-k-verifier compute-side variable example.
+# Copy to terraform.tfvars and fill in your values before running terraform apply.
+# Variables with defaults are shown commented-out — uncomment to override.
+
+# ── Required ─────────────────────────────────────────────────────────────────
+
+# GCP project where the Confidential VM runs (workload owner's project).
+compute_project_id = "my-compute-project"
+
+# ── Baked environment ─────────────────────────────────────────────────────────
+
+# Blessed environment selector (staging | testnet | mainnet), passed to the
+# workload as tee-env-COFHE_ENV — the ONLY reader-source input. The partner set,
+# per-partner WIF audiences, the keygen public-material bucket/object, the Shamir
+# threshold, AND the whole runtime config.toml are BAKED into the binary
+# (cofhe-keys env map + baked config) and selected by this value, fail-closed at
+# boot. There are no partner/bucket/SA/audience/threshold variables here.
+env = "testnet"
+
+# Full image path in the shared artifact registry (without the digest).
+image_reference = "europe-west4-docker.pkg.dev/fhenix-artifacts-registry/zee-k-verifier/zee-k-verifier"
+
+# Exact digest of the image to run. Must match the digest pinned in the keys-side WIP CEL condition.
+image_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+# The ct-server endpoint the verifier writes stored cts to, passed as
+# STORE_CTS_ENDPOINT and injected into the baked config at boot. The one
+# operator-supplied endpoint (mirrors teecryptor's CT_SOURCE_URL); everything else
+# in config.toml is baked per-env.
+store_cts_endpoint = "https://ct-server.internal:9451"
+
+# Name of the GCS bucket the verifier writes zk proof inputs to. Must match the
+# baked storage.bucket for `env` above (testnet → testnet-v2-inputs, staging →
+# zk-test-inputs, mainnet → fhenix-mainnet-zee-k-inputs); grants the compute SA write.
+proofs_bucket = "testnet-v2-inputs"
+
+# Have Terraform create the proofs bucket in this project. Leave false (the
+# default) when the bucket already exists — Terraform then only grants IAM on it.
+# create_proofs_bucket = true
+
+# Bucket that keeps the proofs-bucket audit logs. Terraform always creates it.
+# Empty (the default) means "<proofs_bucket>-audit-logs".
+# audit_logs_bucket = "testnet-v2-inputs-audit-logs"
+#
+# The audit logs never expire: no lifecycle rule ages them out, and the retention
+# policy below refuses every delete. The policy is unlocked, so the bucket stays
+# deletable — set audit_logs_retention_days = 0, apply, then destroy.
+# audit_logs_retention_days = 36500      # 100 years, the GCS maximum
+# audit_logs_retention_locked = true     # one-way; the bucket then cannot be deleted
+#
+# Lets `terraform destroy` take the bucket once the policy is gone.
+# audit_logs_force_destroy = true
+
+# GKE pod CIDR of the calling cluster (allowed through the VM firewall).
+gke_pod_cidr = "10.100.0.0/16"
+
+# ── Region / zone ─────────────────────────────────────────────────────────────
+
+# region  = "europe-west4"
+# zone    = "europe-west4-b"
+
+# ── VM sizing ─────────────────────────────────────────────────────────────────
+
+# machine_type    = "c3-standard-22"   # TFHE ServerKey deserialization is memory-heavy
+# mig_target_size = 1
+
+# /verify concurrency knobs (optional; omit => binary auto-default ceil(vCPUs/32)).
+# On c3-standard-8 the auto-default is 1; scale throughput via mig_target_size.
+# verify_concurrency = 1
+# max_inflight       = 64
+
+# ── Networking ────────────────────────────────────────────────────────────────
+
+# To use an existing VPC (default behaviour):
+# network    = "default"
+# subnetwork = ""                 # required for custom-mode VPCs
+
+# To create a dedicated VPC instead, set:
+# create_network = true
+# vpc_name       = "zee-k-verifier-vpc"
+# subnet_name    = "zee-k-verifier-subnet"
+# subnet_cidr    = "10.0.0.0/24"
+
+# ── HTTPS load balancer — pick exactly one SSL option ─────────────────────────
+
+# Option A — existing classic Compute SSL certificate (google_compute_ssl_certificate self-link):
+# ssl_certificate_id = "projects/my-compute-project/global/sslCertificates/my-cert"
+
+# Option B — existing Certificate Manager cert map managed by another Terraform flow:
+# ssl_certificate_map = "my-existing-cert-map"
+
+# Option C — Google-managed cert for explicit domain list:
+# ssl_domains = ["verifier.example.com"]
+
+# Option D — Google-managed wildcard cert via Certificate Manager (managed by this module):
+# wildcard_domain = "example.com"    # issues *.example.com; add the CNAME from dns_auth_cname_* outputs to DNS
+
+# ── Cloud Armor ───────────────────────────────────────────────────────────────
+
+# Path to a JSON rules file (see armor_rules.json.example). Omit or leave empty
+# to keep the default allow-all policy.
+# armor_rules_file = "armor_rules.json"
+
+# DDoS protection. The defaults enable Adaptive Protection and a per-IP rate
+# limit. The threshold counts one source IP, so callers sharing an egress IP —
+# a GKE cluster behind Cloud NAT — count as one client: measure the caller's
+# real rate first, then raise the thresholds, or set the rate limit to false to
+# remove the rule.
+# armor_adaptive_protection            = true
+# armor_rate_limit_enabled             = true
+# armor_rate_limit_threshold_count     = 90   # throttle above this per interval
+# armor_rate_limit_ban_threshold_count = 180  # ban above this per interval
+# armor_rate_limit_interval_sec        = 60
+# armor_rate_limit_ban_duration_sec    = 300
+
+# ── PSC (Confidential Space → GKE ct-server:9451) ────────────────────────────
+#
+# Terraform creates the full PSC path once you provide the ILB forwarding rule name.
+# Prerequisites: the ct-server-ilb k8s Service must exist and have an EXTERNAL-IP.
+#
+# Step 1 — get the ILB forwarding rule name:
+#
+#   gcloud compute forwarding-rules list --regions=<psc_region> \
+#     --project=<compute_project_id> --format="table(name,IPAddress)" | grep <ct-server-ilb EXTERNAL-IP>
+#
+# Step 2 — fill in the values below and run terraform apply.
+#          Terraform will create: PSC NAT subnet, service attachment, consumer subnet,
+#          consumer endpoint. The VM receives the endpoint IP as GKE_SERVICE_HOST.
+#
+# enable_psc              = true
+# psc_region              = "europe-west1"        # must match the GKE cluster region
+# gke_network             = "my-gke-vpc"
+# gke_ilb_forwarding_rule = "<name from step 1>"
+# psc_endpoint_port       = 9451
+#
+# # Optional — override default CIDRs if they conflict with existing subnets:
+# # psc_nat_subnet_cidr      = "10.0.128.0/29"   # created in the GKE VPC
+# # psc_consumer_subnet_cidr = "10.0.2.0/29"     # created in the Confidential Space VPC
+#
+# # Optional — enable private DNS instead of using the endpoint IP directly:
+# # enable_psc_dns = true
+# # psc_dns_zone   = "ct-server.internal."

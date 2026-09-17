@@ -1,0 +1,55 @@
+[package]
+name = "tdx-signer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license-file = "../LICENSE"
+
+[[bin]]
+name = "tdx-signer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "=1.0.103"
+k256 = { version = "=0.13.4", features = ["ecdsa"] }
+# Official Google Cloud clients — the same ones zk-verifier uses. GCS reads the
+# TFHE material + config via ADC (VM attached SA); Secret Manager reads signer_pk
+# via a custom CredentialsProvider that injects the attested token we already
+# minted (see secrets.rs / gcs.rs). `http` is for the provider's HeaderMap.
+google-cloud-storage = "=1.12.0"
+google-cloud-secretmanager-v1 = "=1.9.0"
+google-cloud-auth = "=1.10.0"
+http = "=1.4.0"
+# Pulled in only to install a process-level rustls CryptoProvider at startup:
+# google-cloud-storage's rustls (0.23) panics if it can't auto-pick one when
+# both ring and aws-lc-rs are in the dependency tree.
+rustls = { version = "=0.23.45", default-features = false, features = ["ring"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+tokio = { version = "=1.52.1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["json", "env-filter"] }
+zeroize = { version = "=1.8.2", features = ["derive", "zeroize_derive"] }
+
+# zk-verifier as a library — supplies KeyMaterial, run_server_with_keys, and the
+# load_tfhe_artifacts helper. Default features include `production` which turns
+# on `store-cts` and `external-storage` in the verifier; configure those at
+# runtime via env vars or override here if a leaner build is desired.
+zk-verifier = { path = "../zk-verifier" }
+
+# Shared key-distribution core (FhenixProtocol/cofhe-tdx-keygen). We embed the
+# READER half only — gather every partner's Shamir share of the zk signer, filter
+# liars by per-share digest, reconstruct T-of-N, and validate against the published
+# full-key digest. Share authenticity comes from the partner write-gate (only the
+# attested keygen enclave can write a partner's share), not consumer-side
+# provenance verification, which was removed. We own identity (per-partner attested
+# WIF federation via attestation.rs + the shared cofhe_keys::gcp_auth STS client);
+# this crate owns the baked env source, wire format, and reconstruction.
+# `default-features = false` drops the in-enclave `writer` path (and its tfhe
+# dep); pinned by rev so the format the reader decodes cannot drift from the
+# producer.
+cofhe-keys = { git = "https://github.com/FhenixProtocol/cofhe-tdx-keygen.git", rev = "84028ad390242fd26c965074b2a482f856c09dad", version = "0.1.0", default-features = false, features = ["reader"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+tower = { version = "=0.5.3", features = ["util"] }

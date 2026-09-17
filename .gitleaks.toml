@@ -1,0 +1,16 @@
+# gitleaks configuration for the CI secret-scan gate.
+# Extends the built-in ruleset and allowlists known non-secrets that the
+# full-history scan would otherwise flag.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets: a test fixture and retired POC key names."
+regexes = [
+  # Deterministic ciphertext-hash fixture in a GCS e2e test (not a credential).
+  '''cafef00d11112222333344445555666677778888999900001111222233334444''',
+  # Retired tdx-signer POC KMS key *names* (identifiers, not key material);
+  # present only in old history and the removed keys-side Terraform.
+  '''tdx-signer-poc-key[0-9]''',
+]

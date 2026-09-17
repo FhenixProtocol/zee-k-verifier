@@ -1,0 +1,61 @@
+# cargo-deny v2 config. CI runs `cargo deny check` (advisories + licenses + bans
+# + sources) for tdx-signer, the one crate that takes the private cofhe-keys git
+# dep. Generous allow-list — tighten as we learn what the dep tree actually pulls.
+# If a new dep brings an unrecognized license, add it here.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "warn"
+# Only fail on unmaintained warnings for crates WE depend on directly. Transitive
+# unmaintained crates from the tfhe / google-cloud / alloy trees are out of our
+# control and would block CI without giving us anywhere to fix them.
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+# The first-party crates in this repo (tdx-signer, zk-verifier, rust-common)
+# carry the Fhenix Non-Commercial Software License via `license-file` and are
+# never published (`publish = false`); this is a custom (non-SPDX) license, so
+# skip the license check for them rather than failing on an unrecognized id.
+private = { ignore = true }
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSD-3-Clause-Clear",       # tfhe-rs
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "OpenSSL",
+    "CDLA-Permissive-2.0",   # webpki-roots — Mozilla root cert store data
+]
+
+[bans]
+multiple-versions = "warn"
+# Deny `*` version requirements EXCEPT for intra-repo path deps (zk-verifier,
+# rust-common), which are pinned by path, not version — a path `*` is not a
+# supply-chain risk the way a registry `*` would be.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# cofhe-keys is consumed as a git dependency from the FhenixProtocol org until it
+# is published to a registry (Artifact Registry Cargo, then crates.io once public —
+# see the producer repo's plan). Scope the allowance to the org so cargo-deny still
+# rejects any other git source.
+[sources.allow-org]
+github = ["FhenixProtocol"]

@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [tdx-signer, zk-verifier, rust-common]
+    defaults:
+      run:
+        working-directory: ${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # `rustup show` reads the nearest rust-toolchain.toml (the per-crate one
+      # if present, otherwise the repo-root one) and installs the channel.
+      # We deliberately do NOT pin a Rust version in this workflow so that the
+      # source of truth stays in rust-toolchain.toml.
+      - name: Install toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }}
+
+      - name: fmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --locked --no-deps -- -D warnings
+
+      - name: build
+        run: cargo build --release --locked
+
+      # --release matters, it is not a style choice: zk-verifier's tests generate
+      # real TFHE key material (a ZK CRS plus a bootstrapping key set, five times
+      # over), and unoptimised tfhe is ~33x slower — measured 221s vs 6.65s for the
+      # same 42 tests, which is why this step used to run for ~44 minutes. It also
+      # reuses what the release `build` above already compiled, instead of building
+      # a second profile of the whole tree. Nothing is given up: the crates carry
+      # no `debug_assert!`, and no test depends on overflow panics.
+      - name: test
+        run: cargo test --release --locked
+
+  # Supply-chain scan for the one crate that takes the private cofhe-keys git dep.
+  supply-chain:
+    name: supply-chain (tdx-signer)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tdx-signer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tdx-signer
+
+      # Run cargo-deny NATIVELY on the runner — NOT via EmbarkStudios/cargo-deny-action,
+      # which runs in an isolated Docker container that can't see .cargo/config.toml
+      # (git-fetch-with-cli). Installing + running natively matches the build job.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo-deny (licenses, bans, advisories, sources)
+        run: cargo deny check
+
+  # Full-history secret scan. History is clean at publication; this gate keeps
+  # every commit clean after the repo is public.
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # only used by the public-gated SARIF upload below
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git --no-banner --redact --report-format sarif --report-path results.sarif --exit-code 1 --config .gitleaks.toml .
+      # Surface findings in the Security tab and as PR annotations. This is free
+      # code scanning on public repos; private repos need paid GHAS for it, so
+      # it stays gated off until the repo is public. The scan above blocks the
+      # merge on a leak either way — always() runs the upload even when it did.
+      - name: Upload gitleaks SARIF
+        if: always() && github.event.repository.visibility == 'public'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

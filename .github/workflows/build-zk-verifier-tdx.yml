@@ -1,0 +1,141 @@
+name: Build zk-verifier TDX image
+
+# IMPORTANT: gated by GitHub Actions Workload Identity Federation in the shared
+# fhenix-artifacts-registry project. Its WIF provider pins this workflow's
+# `job_workflow_ref` (path + ref). Renaming this file or running it from a branch
+# outside the pin breaks the WIF binding until the pin is updated.
+#
+# Builds ONCE and pushes to the shared Artifact Registry. Every environment's
+# VM pulls the same digest from the artifact registry; each partner pins that
+# digest in its attested-reader policy. CI auth uses three NON-SECRET repo
+# variables — WIF_PROVIDER, PUBLISHER_SA, IMAGE_REGISTRY — pointing at
+# fhenix-artifacts-registry. No static service-account keys.
+#
+# BUILDING IS NOT DEPLOYING: keys are only released to the digest the partners
+# pinned (partner re-apply with the new digest).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (default: main-<sha>)"
+        required: false
+        type: string
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - "tdx-signer/**"
+      - "zk-verifier/**"
+      - "rust-common/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/build-zk-verifier-tdx.yml"
+
+# Confidential Space VMs are linux/amd64 only — no multi-arch matrix.
+permissions:
+  contents: read
+  id-token: write       # OIDC → GCP WIF (also used for SLSA provenance signing)
+  # attestations: write — re-enable when the SLSA provenance step below is
+  # restored (repo is private; see note on that step).
+
+env:
+  PLATFORM: linux/amd64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        id: auth-wif
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.PUBLISHER_SA }}
+          # Match the provider's allowed_audiences (GCP "no-scheme" URI form).
+          audience: //iam.googleapis.com/${{ vars.WIF_PROVIDER }}
+          token_format: access_token
+
+      - name: Log in to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.IMAGE_REGISTRY }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth-wif.outputs.access_token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: echo "tag=${INPUT_TAG:-main-${GITHUB_SHA::7}}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v6
+        env:
+          # Google Artifact Registry's Docker v2 API doesn't reliably support
+          # HEAD requests against a manifest that was just created, which is
+          # what buildx uses to attach the default SBOM/provenance attestation
+          # index — that HEAD comes back "400 Bad Request" and fails the push.
+          # `provenance: false` alone doesn't suppress this on current buildx;
+          # the env var is required to fully disable default attestations.
+          BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
+        with:
+          context: .
+          file: tdx-signer/Dockerfile
+          platforms: ${{ env.PLATFORM }}
+          push: true
+          tags: ${{ vars.IMAGE_REGISTRY }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Disable buildx's own provenance/SBOM attestations. (The SLSA-format
+          # attestation step below is currently disabled — repo is private.)
+          provenance: false
+          sbom: false
+
+      # The key-release gate is DIGEST-ONLY: each partner's attested-reader policy
+      # pins the image digest, so no image signing is required. SLSA provenance
+      # (actions/attest-build-provenance, keyless to the public Sigstore/Rekor)
+      # can be added later as a fleet-wide public layer when the repo goes public
+      # (needs attestations: write) — one provenance covers the one image all envs run.
+      # - name: Attach SLSA provenance attestation
+      #   uses: actions/attest-build-provenance@v1
+      #   with:
+      #     subject-name: ${{ vars.IMAGE_REGISTRY }}
+      #     subject-digest: ${{ steps.push.outputs.digest }}
+      #     push-to-registry: true
+
+      - name: Summarize
+        env:
+          REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Image built (shared artifact registry)"
+            echo
+            echo "**Tag:** \`${TAG}\`"
+            echo
+            echo "**Digest:**"
+            echo
+            echo '```'
+            echo "${DIGEST}"
+            echo '```'
+            echo
+            echo "**Full reference:**"
+            echo
+            echo '```'
+            echo "${REGISTRY}@${DIGEST}"
+            echo '```'
+            echo
+            echo "**Pin per env (partner side):**"
+            echo
+            echo "Each partner re-applies its attested-reader policy with this digest."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,45 @@
+[package]
+name = "rust-common"
+version = "0.1.0"
+edition = "2021"
+description = "Shared common utilities for CoFHE Rust services"
+publish = false
+license-file = "../LICENSE"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Versions are pinned to what the committed Cargo.lock resolves (builds run
+# --locked). Deps whose locked version differs across the three crates' locks
+# (this crate is consumed by zk-verifier and tdx-signer, each with its own
+# lock) use a plain full-triple version — the lowest locked version — instead
+# of `=`, because an exact pin would force every consumer's lock to unify.
+tracing = "=0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json", "ansi", "tracing-log"] }
+tracing-appender = "0.2.4"
+log = "=0.4.29"
+tracing-log = "=0.2.0"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+strum = { version = "=0.27.2", features = ["derive"] }
+anyhow = "1.0.101"
+chrono = "0.4.43"
+
+# Optional dependencies, each gated by a feature below.
+sha2 = { version = "=0.10.9", optional = true }
+hex = { version = "=0.4.3", optional = true }
+k256 = { version = "=0.13.4", features = ["ecdsa"], optional = true }
+sha3 = { version = "0.10.8", optional = true }
+thiserror = { version = "=2.0.18", optional = true }
+tfhe = { version = "=1.5.1", optional = true }
+
+[dev-dependencies]
+toml = "=0.8.23"
+tempfile = "=3.25.0"
+
+[features]
+default = []
+keygen = ["dep:sha2", "dep:hex"]
+signing = ["dep:k256", "dep:sha3", "dep:hex", "dep:thiserror"]
+safe-serde = ["dep:tfhe"]

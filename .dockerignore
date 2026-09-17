@@ -1,0 +1,9 @@
+# Keep the Docker build context small. Both Dockerfiles (zk-verifier/,
+# tdx-signer/) only need source + Cargo manifests; everything below is either
+# build output, VCS metadata, or local tooling that bloats the context.
+**/target
+.git
+.github
+**/*.md
+config/keys
+docker

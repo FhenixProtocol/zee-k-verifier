@@ -1,0 +1,5 @@
+# staging overlay — only the per-env difference from envs/base.toml.
+# Verified-inputs output bucket; must match the `proofs_bucket` tfvar that grants
+# the compute SA write (terraform/compute).
+[storage]
+bucket = "zk-test-inputs"
