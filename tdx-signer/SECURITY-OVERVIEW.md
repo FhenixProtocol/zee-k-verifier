@@ -153,8 +153,21 @@ To run a different image an attacker needs two things: the ability to dispatch o
 exact GitHub workflow (the `job_workflow_ref` pin), **and** the cooperation of ≥ T
 partners to repin a new digest in their CELs.
 
-The image carries **no signature**. The digest pinned in each partner's CEL is the
-whole enforcement, and it is what every claim in this document rests on.
+The digest pinned in each partner's CEL is the whole **runtime** enforcement, and it
+is what every claim in this document rests on. The attestation token carries no
+repository, workflow or commit claim, so the CEL cannot prove where an image came
+from — only which one runs.
+
+That proof lives one step earlier. The build signs the pushed digest with keyless
+Cosign, and the certificate binds the digest to this repository, this workflow, the
+ref and the commit. Before a partner pins a digest it runs `cosign verify` against
+the public Rekor log, asserting the exact digest and the exact commit, and it does
+not pin on a non-zero exit. The check needs no Fhenix credential and no GitHub
+account, so a partner trusts the public log rather than us.
+
+Cosign stores the signature next to the image. The Artifact Registry repository
+grants `allUsers` the reader role, which is what lets a partner read it. **That
+public read is deliberate and the check depends on it.**
 
 ## Who signs the attestation report?
 
