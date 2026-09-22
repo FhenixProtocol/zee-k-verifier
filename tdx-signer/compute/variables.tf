@@ -70,13 +70,14 @@ variable "audit_logs_bucket" {
 }
 
 variable "audit_logs_retention_days" {
-  type        = number
-  default     = 36500
-  description = "Retention period of the audit-log bucket, in days: the floor below which GCS refuses to delete an entry. The default is 36500 (100 years, the GCS maximum), so the audit logs never expire. The policy is unlocked, so a teardown can set this to 0, apply, and then delete the bucket. 0 means no retention policy at all."
+  type = number
+  # 24855 days is the provider's int32 ceiling for retention_period. GCS allows 100 years.
+  default     = 24855
+  description = "Retention period of the audit-log bucket, in days: the floor below which GCS refuses to delete an entry. 24855 (68 years) is the most the provider accepts, so the logs never expire in practice. The policy is unlocked, so a teardown can set this to 0, apply, and then delete the bucket. 0 means no retention policy at all."
 
   validation {
-    condition     = var.audit_logs_retention_days >= 0 && var.audit_logs_retention_days <= 36524
-    error_message = "audit_logs_retention_days must be between 0 and 36524 (the GCS retention_period maximum of 3155760000 seconds)."
+    condition     = var.audit_logs_retention_days >= 0 && var.audit_logs_retention_days <= 24855
+    error_message = "audit_logs_retention_days must be between 0 and 24855, the provider's int32 ceiling."
   }
 }
 

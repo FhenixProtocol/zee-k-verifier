@@ -116,6 +116,9 @@ resource "google_project_iam_custom_role" "proofs_appender" {
   ]
 }
 
+# A new custom role takes a few seconds to propagate, so the FIRST apply in a
+# fresh project can fail here with "does not exist in the resource's hierarchy".
+# Re-run; nothing is wrong.
 resource "google_storage_bucket_iam_member" "proofs_writer" {
   bucket     = var.proofs_bucket
   role       = google_project_iam_custom_role.proofs_appender.id
