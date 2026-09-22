@@ -141,20 +141,35 @@ The key-release gate is **digest-only**. Each partner's WIF CEL pins the exact
 `image_digest`, plus the project, Intel-TDX, and STABLE. Only the exact reviewed
 image bytes can federate a read token for any partner's share. The chain is:
 
-1. **GitHub Actions** runs `build-zk-verifier-tdx.yml` (manual dispatch only) on a
-   hosted runner.
+1. **GitHub Actions** runs `build-zk-verifier-tdx.yml` on a hosted runner, on a
+   manual dispatch or on a push to `main`.
 2. The workflow uses **GCP Workload Identity Federation** scoped to *this exact
    workflow file at this exact ref* (`job_workflow_ref`) to push the image to
    Artifact Registry. No SA key sits in the repo.
 3. Each partner pins the resulting digest in its own CEL. Only that digest can
    attest and receive that partner's share.
 
-To run a different image an attacker needs two things: the ability to dispatch our
-exact GitHub workflow (the `job_workflow_ref` pin), **and** the cooperation of ≥ T
-partners to repin a new digest in their CELs.
+To run a different image an attacker needs two things: the ability to run our exact
+GitHub workflow — by dispatching it, or by landing a commit on `main` — subject to the
+`job_workflow_ref` pin, **and** the cooperation of ≥ T partners to repin a new digest
+in their CELs.
 
-The image carries **no signature**. The digest pinned in each partner's CEL is the
-whole enforcement, and it is what every claim in this document rests on.
+The digest pinned in each partner's CEL is the whole **runtime** enforcement, and it
+is what every claim in this document rests on. The attestation token carries no
+repository, workflow or commit claim, so the CEL cannot prove where an image came
+from — only which one runs.
+
+That proof lives one step earlier. The build emits a keyless SLSA build provenance
+attestation, and the certificate binds the digest to this repository, this workflow,
+the ref and the commit. Before a partner pins a digest it runs `gh attestation
+verify`, asserting the exact digest, the exact commit, this workflow file and
+`refs/heads/main`, and it does not pin on a non-zero exit.
+
+The attestation is public: GitHub serves the bundle over an API that needs no
+account, and it is also in the public Rekor log. The check needs no Fhenix credential
+and no GitHub login, so a partner trusts the public record rather than us. Resolving
+the image manifest does use the Artifact Registry repository's `allUsers` reader
+grant. **That public read is deliberate and the check depends on it.**
 
 ## Who signs the attestation report?
 

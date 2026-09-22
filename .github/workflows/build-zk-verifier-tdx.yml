@@ -13,6 +13,12 @@ name: Build zk-verifier TDX image
 #
 # BUILDING IS NOT DEPLOYING: keys are only released to the digest the partners
 # pinned (partner re-apply with the new digest).
+#
+# The build attests SLSA build provenance for the pushed digest, using this
+# workflow's OIDC token and Fulcio. No signing key exists. The attestation goes
+# to the public Rekor log, and GitHub serves it on a public API that needs no
+# account. A partner checks provenance at PIN time, before it approves a digest.
+# The runtime gate does not change: each partner's CEL still pins the digest only.
 
 on:
   workflow_dispatch:
@@ -36,9 +42,8 @@ on:
 # Confidential Space VMs are linux/amd64 only — no multi-arch matrix.
 permissions:
   contents: read
-  id-token: write       # OIDC → GCP WIF (also used for SLSA provenance signing)
-  # attestations: write — re-enable when the SLSA provenance step below is
-  # restored (repo is private; see note on that step).
+  id-token: write     # OIDC → GCP WIF, and Fulcio for the attestation
+  attestations: write # SLSA build provenance
 
 env:
   PLATFORM: linux/amd64
@@ -94,28 +99,51 @@ jobs:
           tags: ${{ vars.IMAGE_REGISTRY }}:${{ steps.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Disable buildx's own provenance/SBOM attestations. (The SLSA-format
-          # attestation step below is currently disabled — repo is private.)
+          # Disable buildx's own provenance/SBOM attestations. The SLSA
+          # attestation step below is the one that counts.
           provenance: false
           sbom: false
 
-      # The key-release gate is DIGEST-ONLY: each partner's attested-reader policy
-      # pins the image digest, so no image signing is required. SLSA provenance
-      # (actions/attest-build-provenance, keyless to the public Sigstore/Rekor)
-      # can be added later as a fleet-wide public layer when the repo goes public
-      # (needs attestations: write) — one provenance covers the one image all envs run.
-      # - name: Attach SLSA provenance attestation
-      #   uses: actions/attest-build-provenance@v1
-      #   with:
-      #     subject-name: ${{ vars.IMAGE_REGISTRY }}
-      #     subject-digest: ${{ steps.push.outputs.digest }}
-      #     push-to-registry: true
+      # The certificate Fulcio issues names this repo, this workflow, the ref and
+      # the commit. Those are the four fields the partner asserts at pin time.
+      #
+      # The build makes one platform. Thus this digest is the amd64 platform
+      # digest. The attestation and the partner pin both name it.
+      #
+      # push-to-registry stays FALSE. GitHub serves the bundle on a public API
+      # that needs no account, which is where the partner reads it. It also must
+      # stay false here for the reason recorded on the build step above: a
+      # registry push HEADs the manifest that was just created, and GAR answers
+      # that with 400.
+      #
+      # This action is pinned by SHA. Other actions in this file are not; that is
+      # a wider gap, not something this pin closes.
+      - name: Attest SLSA build provenance
+        id: attest
+        if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-name: ${{ vars.IMAGE_REGISTRY }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: false
 
+      # always(), so a failure above never costs the operator the digest.
       - name: Summarize
+        if: always() && steps.push.outputs.digest != ''
         env:
           REGISTRY: ${{ vars.IMAGE_REGISTRY }}
           TAG: ${{ steps.meta.outputs.tag }}
           DIGEST: ${{ steps.push.outputs.digest }}
+          COMMIT: ${{ github.sha }}
+          # CONSTANTS, written out in full and deliberately NOT derived from this
+          # run. A command that asserts whatever the run already was proves
+          # nothing. These are the values the partner tooling bakes in.
+          REPO: FhenixProtocol/zee-k-verifier
+          SIGNER_WORKFLOW: FhenixProtocol/zee-k-verifier/.github/workflows/build-zk-verifier-tdx.yml
+          REF: refs/heads/main
+          # The handoff is only safe to use when provenance actually exists. It
+          # does not exist for a build off main, or when the attest step failed.
+          ATTESTED: ${{ steps.attest.outcome == 'success' }}
         run: |
           set -euo pipefail
           {
@@ -135,7 +163,45 @@ jobs:
             echo "${REGISTRY}@${DIGEST}"
             echo '```'
             echo
-            echo "**Pin per env (partner side):**"
-            echo
-            echo "Each partner re-applies its attested-reader policy with this digest."
+            if [ "${ATTESTED}" != "true" ]; then
+              echo "> ### NO ATTESTATION — DO NOT HAND THIS TO A PARTNER"
+              echo ">"
+              echo "> No provenance exists for this digest: the build was not on main,"
+              echo "> or the attestation step did not succeed. A partner check on it"
+              echo "> fails, and the failure reads like tampering."
+            else
+              echo "### Hand these two values to each partner"
+              echo
+              echo "They go in the \`zee-k\` entry of \`attested_readers\`."
+              echo "**Not** at the top level — that is the keygen write gate."
+              echo
+              echo '```hcl'
+              echo "image_digest = \"${DIGEST}\""
+              echo "source_sha   = \"${COMMIT}\""
+              echo '```'
+              echo
+              echo "Each partner re-applies its attested-reader policy with these."
+              echo
+              echo "### Verify this image"
+              echo
+              echo "The partner tool in key-share-holders (\`partner/verify-image.sh\`)"
+              echo "is the authoritative check and holds these values as constants."
+              echo "This is the same check, spelled out. It runs on any machine and"
+              echo "needs no Fhenix credential and no GitHub account. A non-zero exit"
+              echo "means: do not pin."
+              echo
+              echo '```bash'
+              echo "# -f and -e so a missing attestation fails here, loudly, instead"
+              echo "# of writing \"null\" into bundle.json and confusing gh."
+              echo "curl -fsSL https://api.github.com/repos/${REPO}/attestations/${DIGEST} \\"
+              echo "  | jq -e '.attestations[0].bundle' > bundle.json"
+              echo
+              echo "gh attestation verify oci://${REGISTRY}@${DIGEST} \\"
+              echo "  --bundle bundle.json \\"
+              echo "  --repo ${REPO} \\"
+              echo "  --signer-workflow ${SIGNER_WORKFLOW} \\"
+              echo "  --source-ref ${REF} \\"
+              echo "  --source-digest ${COMMIT}"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
