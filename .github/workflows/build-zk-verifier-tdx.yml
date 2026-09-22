@@ -14,11 +14,11 @@ name: Build zk-verifier TDX image
 # BUILDING IS NOT DEPLOYING: keys are only released to the digest the partners
 # pinned (partner re-apply with the new digest).
 #
-# The build signs the pushed digest with keyless Cosign. It also attests SLSA
-# build provenance. Both use this workflow's OIDC token. Both go to the public
-# Rekor log. No signing key exists. A partner checks the signature at PIN time,
-# before it approves a digest. The runtime gate does not change: each partner's
-# CEL still pins the digest only.
+# The build attests SLSA build provenance for the pushed digest, using this
+# workflow's OIDC token and Fulcio. No signing key exists. The attestation goes
+# to the public Rekor log, and GitHub serves it on a public API that needs no
+# account. A partner checks provenance at PIN time, before it approves a digest.
+# The runtime gate does not change: each partner's CEL still pins the digest only.
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ on:
 # Confidential Space VMs are linux/amd64 only — no multi-arch matrix.
 permissions:
   contents: read
-  id-token: write     # OIDC → GCP WIF, and Fulcio for keyless Cosign
+  id-token: write     # OIDC → GCP WIF, and Fulcio for the attestation
   attestations: write # SLSA build provenance
 
 env:
@@ -104,51 +104,42 @@ jobs:
           provenance: false
           sbom: false
 
-      # These two actions are pinned by SHA, unlike the rest of this file. A
-      # moved tag on either one forges provenance for every image we ship.
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
-
-      # Cosign gets a certificate from Fulcio with this job's OIDC token. The
-      # certificate names the repo, the workflow, the ref and the commit. The
-      # partner asserts those four fields at pin time.
+      # The certificate Fulcio issues names this repo, this workflow, the ref and
+      # the commit. Those are the four fields the partner asserts at pin time.
       #
       # The build makes one platform. Thus this digest is the amd64 platform
-      # digest. The signature, the attestation and the partner pin all name it.
+      # digest. The attestation and the partner pin both name it.
       #
-      # Cosign stores the signature next to the image, under the tag
-      # sha256-<digest>.sig. This registry grants allUsers the reader role, so a
-      # partner reads that signature with no credential. That public read is
-      # DELIBERATE and the partner check depends on it. Do not remove it.
-      - name: Sign the image with keyless Cosign
-        env:
-          REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          set -euo pipefail
-          cosign sign --yes "${REGISTRY}@${DIGEST}"
-
-      # The same identity attests the same digest in the standard SLSA format.
-      # The partner verify command reads the Cosign signature above. This
-      # attestation serves any other consumer.
+      # push-to-registry stays FALSE. GitHub serves the bundle on a public API
+      # that needs no account, which is where the partner reads it. It also must
+      # stay false here for the reason recorded on the build step above: a
+      # registry push HEADs the manifest that was just created, and GAR answers
+      # that with 400.
+      #
+      # This action is pinned by SHA. Other actions in this file are not; that is
+      # a wider gap, not something this pin closes.
       - name: Attest SLSA build provenance
+        if: github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-name: ${{ vars.IMAGE_REGISTRY }}
           subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
+          push-to-registry: false
 
+      # always(), so a failure above never costs the operator the digest.
       - name: Summarize
+        if: always() && steps.push.outputs.digest != ''
         env:
           REGISTRY: ${{ vars.IMAGE_REGISTRY }}
           TAG: ${{ steps.meta.outputs.tag }}
           DIGEST: ${{ steps.push.outputs.digest }}
           COMMIT: ${{ github.sha }}
-          REPO: ${{ github.repository }}
-          REF: ${{ github.ref }}
-          # workflow_ref is "<owner>/<repo>/<path>@<ref>". Add the server URL and
-          # it equals the Fulcio certificate identity.
-          IDENTITY: ${{ github.server_url }}/${{ github.workflow_ref }}
+          # CONSTANTS, written out in full and deliberately NOT derived from this
+          # run. A command that asserts whatever the run already was proves
+          # nothing. These are the values the partner tooling bakes in.
+          REPO: FhenixProtocol/zee-k-verifier
+          SIGNER_WORKFLOW: FhenixProtocol/zee-k-verifier/.github/workflows/build-zk-verifier-tdx.yml
+          REF: refs/heads/main
         run: |
           set -euo pipefail
           {
@@ -179,18 +170,20 @@ jobs:
             echo "That is the whole handoff. The partner tooling holds the rest"
             echo "as fixed constants."
             echo
-            echo "### Verify this image against the public Rekor log"
+            echo "### Verify this image"
             echo
-            echo "The partner runs this on their own machine. It proves that this"
-            echo "workflow built this digest from this commit. A non-zero exit means:"
-            echo "do not pin."
+            echo "Runs on any machine. It needs no Fhenix credential and no GitHub"
+            echo "account. A non-zero exit means: do not pin."
             echo
-            echo '```'
-            echo "cosign verify ${REGISTRY}@${DIGEST} \\"
-            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
-            echo "  --certificate-identity ${IDENTITY} \\"
-            echo "  --certificate-github-workflow-repository ${REPO} \\"
-            echo "  --certificate-github-workflow-ref ${REF} \\"
-            echo "  --certificate-github-workflow-sha ${COMMIT}"
+            echo '```bash'
+            echo "curl -sL https://api.github.com/repos/${REPO}/attestations/${DIGEST} \\"
+            echo "  | jq '.attestations[0].bundle' > bundle.json"
+            echo
+            echo "gh attestation verify oci://${REGISTRY}@${DIGEST} \\"
+            echo "  --bundle bundle.json \\"
+            echo "  --repo ${REPO} \\"
+            echo "  --signer-workflow ${SIGNER_WORKFLOW} \\"
+            echo "  --source-ref ${REF} \\"
+            echo "  --source-digest ${COMMIT}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
