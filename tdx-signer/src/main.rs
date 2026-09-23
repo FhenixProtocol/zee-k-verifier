@@ -346,14 +346,11 @@ async fn main() -> Result<()> {
     // here as a first-class value (mirrors teecryptor's CT_SOURCE_URL) rather than
     // via zk-verifier's generic APP__ config overlay, which is slated for removal.
     zk_config.store_cts.endpoint = cfg.store_cts_endpoint.clone();
-    // The TDX deployment pushes its metrics; nothing can scrape this VPC. The
-    // destination is compiled into zk-verifier (otel_push::TELEMETRY_ENDPOINT),
-    // deliberately not operator-settable: no credentialed request can be
-    // redirected by configuration.
-    zk_config.metrics = zk_verifier::config::MetricsConfig {
-        mode: zk_verifier::config::MetricsMode::Otlp,
-        env: Some(cfg.env.clone()),
-    };
+    // Push vs. exposition-only is baked per-env: envs/base.toml sets `otlp` (nothing
+    // can scrape this VPC) and an overlay may opt out. The destination is compiled
+    // into zk-verifier (otel_push::TELEMETRY_ENDPOINT), deliberately not
+    // operator-settable: no credentialed request can be redirected by configuration.
+    zk_config.metrics.env = Some(cfg.env.clone());
 
     let gcs = Gcs::new(GCS_STORAGE_URL)
         .await
@@ -539,6 +536,18 @@ mod tests {
     /// must have a matching baked runtime-config overlay here. Driving the loop off
     /// `cofhe_keys::reader::env_names()` (the same list the reader resolves) means a
     /// new env added there can't ship without an overlay — this test fails first.
+    #[test]
+    fn metrics_push_is_on_except_staging() {
+        use zk_verifier::config::MetricsMode;
+        for env in ["staging", "testnet", "mainnet"] {
+            let c = zk_verifier::config::Builder::from_baked(BASE_CONFIG, env_overlay(env).unwrap())
+                .build()
+                .unwrap();
+            let push = matches!(c.metrics.mode, MetricsMode::Otlp);
+            assert_eq!(push, env != "staging", "metrics push for {env}");
+        }
+    }
+
     #[test]
     fn env_overlay_covers_every_baked_key_env() {
         for name in cofhe_keys::reader::env_names() {

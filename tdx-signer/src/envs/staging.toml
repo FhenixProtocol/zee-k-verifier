@@ -3,3 +3,7 @@
 # the compute SA write (terraform/compute).
 [storage]
 bucket = "zk-test-inputs"
+
+# No OTLP metrics push from staging; the :9090 exposition stays up.
+[metrics]
+mode = "prometheus"

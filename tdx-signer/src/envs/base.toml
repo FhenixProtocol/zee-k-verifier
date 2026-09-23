@@ -16,6 +16,11 @@ bind_port    = 3001
 # debug view for when a push looks wrong (see compute/main.tf).
 metrics_port = 9090
 
+[metrics]
+# Push to the compiled-in Telemetry endpoint (otel_push::TELEMETRY_ENDPOINT) — the
+# default for every env. An overlay opts out with mode = "prometheus".
+mode = "otlp"
+
 [keys]
 crs_path           = "/app/keys/crs"
 pk_path            = "/app/keys/public_key"
