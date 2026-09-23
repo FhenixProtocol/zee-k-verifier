@@ -87,7 +87,7 @@ clap = { version = "=4.6.1", features = ["derive"] }
 rand = "=0.8.6"
 
 
-# OTLP push pipeline (metrics.mode = "otlp"). The 0.31 line matches the
+# OTLP push pipeline (metrics.push = true). The 0.31 line matches the
 # opentelemetry graph google-cloud-* already resolves; http-proto only, and the
 # exporter always receives our own client, so no reqwest feature is pulled.
 #

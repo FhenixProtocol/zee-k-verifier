@@ -125,7 +125,7 @@ fn key_hash(digest: &[u8; 32]) -> String {
 const BASE_CONFIG: &str = include_str!("envs/base.toml");
 
 /// The per-environment overlay — only the fields that differ from `BASE_CONFIG`
-/// (today just `storage.bucket`). Layered on top of the base by the zk-verifier
+/// (today `storage.bucket` and `metrics.push`). Layered on top of the base by the zk-verifier
 /// `Builder` (later wins). Selected by the blessed `COFHE_ENV`; bails on any env
 /// with no baked overlay (kept in lockstep with `cofhe-keys`'s env map).
 fn env_overlay(env: &str) -> Result<&'static str> {
@@ -346,8 +346,8 @@ async fn main() -> Result<()> {
     // here as a first-class value (mirrors teecryptor's CT_SOURCE_URL) rather than
     // via zk-verifier's generic APP__ config overlay, which is slated for removal.
     zk_config.store_cts.endpoint = cfg.store_cts_endpoint.clone();
-    // Push vs. exposition-only is baked per-env: envs/base.toml sets `otlp` (nothing
-    // can scrape this VPC) and an overlay may opt out. The destination is compiled
+    // Whether to push is baked per-env: `[metrics] push` is off unless an overlay
+    // turns it on (nothing can scrape this VPC). The destination is compiled
     // into zk-verifier (otel_push::TELEMETRY_ENDPOINT), deliberately not
     // operator-settable: no credentialed request can be redirected by configuration.
     zk_config.metrics.env = Some(cfg.env.clone());
@@ -532,22 +532,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn metrics_push_matches_baked_overlays() {
+        for env in ["staging", "testnet", "mainnet"] {
+            let c =
+                zk_verifier::config::Builder::from_baked(BASE_CONFIG, env_overlay(env).unwrap())
+                    .build()
+                    .unwrap();
+            assert_eq!(c.metrics.push, env != "staging", "metrics push for {env}");
+        }
+    }
+
     /// Lockstep with the baked key SOURCE: every env in the shared `cofhe-keys` map
     /// must have a matching baked runtime-config overlay here. Driving the loop off
     /// `cofhe_keys::reader::env_names()` (the same list the reader resolves) means a
     /// new env added there can't ship without an overlay — this test fails first.
-    #[test]
-    fn metrics_push_is_on_except_staging() {
-        use zk_verifier::config::MetricsMode;
-        for env in ["staging", "testnet", "mainnet"] {
-            let c = zk_verifier::config::Builder::from_baked(BASE_CONFIG, env_overlay(env).unwrap())
-                .build()
-                .unwrap();
-            let push = matches!(c.metrics.mode, MetricsMode::Otlp);
-            assert_eq!(push, env != "staging", "metrics push for {env}");
-        }
-    }
-
     #[test]
     fn env_overlay_covers_every_baked_key_env() {
         for name in cofhe_keys::reader::env_names() {

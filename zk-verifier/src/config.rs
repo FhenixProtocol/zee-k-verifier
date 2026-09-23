@@ -61,36 +61,17 @@ impl Default for HealthConfig {
     }
 }
 
-/// How recorded metrics LEAVE the process. `prometheus` (local dev, stress
-/// tooling) only serves the pull exposition on `server.metrics_port`; `otlp`
-/// pushes to the compiled-in Google Telemetry endpoint
-/// (`otel_push::TELEMETRY_ENDPOINT`) — a VM in this unpeered VPC has no
-/// scraper — and still serves that exposition as an IAP-only debug surface.
-#[derive(Debug, Deserialize, Clone)]
-pub enum MetricsMode {
-    #[serde(rename = "prometheus")]
-    Prometheus,
-    #[serde(rename = "otlp")]
-    Otlp,
-}
-
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct MetricsConfig {
-    #[serde(default = "default_metrics_mode")]
-    pub mode: MetricsMode,
+    /// Push metrics over OTLP to the compiled-in Google Telemetry endpoint
+    /// (`otel_push::TELEMETRY_ENDPOINT`) — a VM in this unpeered VPC has no
+    /// scraper. The pull exposition on `server.metrics_port` is served either
+    /// way. Off by default: local dev and stress tooling have no VM identity to
+    /// push as.
+    pub push: bool,
     /// Environment name, exported as `service.namespace`.
-    #[serde(default)]
     pub env: Option<String>,
-}
-
-fn default_metrics_mode() -> MetricsMode {
-    MetricsMode::Prometheus
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        MetricsConfig { mode: default_metrics_mode(), env: None }
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -239,12 +220,11 @@ impl Default for Builder {
 mod tests {
     use super::*;
 
-    /// The default stays prometheus: local dev and the stress tools keep the
-    /// pull exposition with zero configuration.
+    /// The default stays no-push: local dev and the stress tools keep the pull
+    /// exposition with zero configuration.
     #[test]
-    fn metrics_default_is_prometheus() {
-        let cfg = MetricsConfig::default();
-        assert!(matches!(cfg.mode, MetricsMode::Prometheus));
+    fn metrics_push_default_is_off() {
+        assert!(!MetricsConfig::default().push);
     }
 
     // The base + per-env overlay must DEEP-merge: an overlay that sets only
