@@ -6,7 +6,7 @@ use rust_common::log::{debug, error, info};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::api::{self, track_http_metrics, AppState};
-use crate::config::{Config, MetricsMode};
+use crate::config::Config;
 use crate::signer::ecdsa::Signer;
 #[cfg(feature = "external-storage")]
 use crate::storage::{storage_manager::StorageManager, StorageFactory};
@@ -106,13 +106,13 @@ pub async fn run_server(
     info!("API server running on {}", api_addr);
     info!("StoreCts endpoint configured as: {}", config.store_cts.endpoint);
 
-    // One recorder always feeds the text exposition. In otlp mode a second
+    // One recorder always feeds the text exposition. With push on, a second
     // feeds the push pipeline and the two ride a fanout, because
     // `set_global_recorder` accepts exactly one recorder and the exposition
     // must survive as the debug surface while OTLP does the collecting.
     let (prom_recorder, prom_handle) = api::prometheus_recorder();
-    let _otel_provider = match config.metrics.mode {
-        MetricsMode::Otlp => match crate::otel_push::build_pipeline(&config.metrics) {
+    let _otel_provider = if config.metrics.push {
+        match crate::otel_push::build_pipeline(&config.metrics) {
             Ok((provider, otel_recorder)) => {
                 let fanout = metrics_util::layers::FanoutBuilder::default()
                     .add_recorder(prom_recorder)
@@ -132,12 +132,11 @@ pub async fn run_server(
                     .map_err(|e| format!("install prometheus metrics recorder: {e}"))?;
                 None
             }
-        },
-        MetricsMode::Prometheus => {
-            metrics::set_global_recorder(prom_recorder)
-                .map_err(|e| format!("install prometheus metrics recorder: {e}"))?;
-            None
         }
+    } else {
+        metrics::set_global_recorder(prom_recorder)
+            .map_err(|e| format!("install prometheus metrics recorder: {e}"))?;
+        None
     };
 
     // Liveness heartbeat: always 1, re-reported on every scrape or push.
@@ -163,11 +162,11 @@ pub async fn run_server(
         Duration::from_secs(config.health.probe_interval_secs),
     );
 
-    // Two servers, one process. In otlp mode the exposition port is NOT a
+    // Two servers, one process. With push on, the exposition port is NOT a
     // collection path — the push is — it is the IAP-only debug surface (see
-    // tdx-signer/compute/main.tf); in prometheus mode it is the only path.
+    // tdx-signer/compute/main.tf); with push off it is the only path.
     let metrics_addr = format!("{}:{}", config.server.bind_address, config.server.metrics_port);
-    info!("Metrics exposition on {} ({:?} mode)", metrics_addr, config.metrics.mode);
+    info!("Metrics exposition on {} (push: {})", metrics_addr, config.metrics.push);
     let metrics_listener = tokio::net::TcpListener::bind(&metrics_addr).await?;
     tokio::try_join!(
         axum::serve(api_listener, app),
