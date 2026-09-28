@@ -99,10 +99,12 @@ The `StoreCts` request shape is defined by `StoreCtsRequest` in `zk-verifier/src
 
 The metric names, types, and buckets are defined in `zk-verifier/src/api/mod.rs`.
 
-Serving depends on the metrics mode (see `zk-verifier/src/config.rs`):
+The metrics port always serves the text exposition. The `[metrics] push` flag (see `zk-verifier/src/config.rs`) adds an OTLP push:
 
-- `prometheus`: the metrics port serves the text exposition.
-- `otlp` (production): the series push to the configured OTLP endpoint, and the port stays reachable over an IAP tunnel as a debug surface for a failed push.
+- Off (the default): the exposition is the only collection path.
+- On: the series push to the Google Telemetry endpoint compiled into `zk-verifier/src/otel_push.rs`. The port stays reachable over an IAP tunnel as a debug surface for a failed push.
+
+The TDX deployment sets the flag per env in the baked overlays under `tdx-signer/src/envs/`.
 
 `/verifyBatch` is the only verification endpoint, so `zk_verify_batch_size_ciphertexts` holds the full distribution of real batch sizes. A single-input encrypt is a batch of one.
 
