@@ -166,6 +166,7 @@ impl Builder {
     /// (both `include_str!`'d by the tdx-signer). No filesystem — the overlay's keys
     /// override the base's, keys it omits fall through (the `config` crate merges
     /// hierarchically). Used on the attested boot path instead of reading a file.
+    /// `APP__` env vars do not apply: the attested config is exactly what is baked.
     pub fn from_baked(base: impl Into<String>, overlay: impl Into<String>) -> Builder {
         Builder { config_path: String::new(), baked: Some((base.into(), overlay.into())) }
     }
@@ -198,12 +199,12 @@ impl Builder {
                 } else {
                     warn!("Configuration file {} not found, using defaults", config_file.display());
                 }
+                // Add in settings from environment variables (with a prefix of APP and '__' as separator)
+                // E.g. `APP_SERVER__PORT=5001 would set `Config.server.port`
+                builder =
+                    builder.add_source(config::Environment::with_prefix("APP").separator("__"));
             }
         }
-
-        // Add in settings from environment variables (with a prefix of APP and '__' as separator)
-        // E.g. `APP_SERVER__PORT=5001 would set `Config.server.port`
-        builder = builder.add_source(config::Environment::with_prefix("APP").separator("__"));
 
         // Build the configuration
         builder.build()?.try_deserialize()
