@@ -31,7 +31,8 @@ store_cts_endpoint = "https://ct-server.internal:9451"
 
 # Name of the GCS bucket the verifier writes zk proof inputs to. Must match the
 # baked storage.bucket for `env` above (testnet → testnet-v2-inputs, staging →
-# zk-test-inputs, mainnet → fhenix-mainnet-zee-k-inputs); grants the compute SA write.
+# zk-test-inputs, mainnet → fhenix-mainnet-zee-k-inputs); grants the compute SA write and
+# anyone (allUsers) read + list.
 proofs_bucket = "testnet-v2-inputs"
 
 # Have Terraform create the proofs bucket in this project. Leave false (the
