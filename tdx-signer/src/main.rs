@@ -169,6 +169,17 @@ impl Config {
             std::env::var(key).with_context(|| format!("env var {} not set", key))
         }
 
+        // `[metrics] push` is baked per-env, but zk-verifier's Builder layers the
+        // APP__ env source over the baked files. Refuse any metrics override so a
+        // setMetadata-capable operator cannot silence an attested VM's push. The
+        // match ignores case, as the `config` crate's prefix match does.
+        if let Some(key) = std::env::vars_os()
+            .filter_map(|(k, _)| k.into_string().ok())
+            .find(|k| k.to_ascii_uppercase().starts_with("APP__METRICS"))
+        {
+            anyhow::bail!("{key} is set; the metrics config is baked per-env");
+        }
+
         // The reader source (partner set + audiences + public-material location +
         // Shamir threshold) is baked into cofhe-keys and selected by COFHE_ENV —
         // fail-closed, BEFORE any network call: an env outside the baked map errors
@@ -533,7 +544,20 @@ mod tests {
     }
 
     #[test]
+    fn config_rejects_metrics_env_override() {
+        let _g = EnvGuard::new(&["COFHE_ENV", "STORE_CTS_ENDPOINT", "app__metrics__push"]);
+        set_required_envs();
+        // Lowercase on purpose: the `config` crate matches the APP__ prefix
+        // case-insensitively, so the guard must too.
+        std::env::set_var("app__metrics__push", "false");
+        assert_from_env_errors_with("app__metrics__push");
+    }
+
+    #[test]
     fn metrics_push_matches_baked_overlays() {
+        // Holds the env lock: Builder::build reads APP__* vars, which the test
+        // above sets.
+        let _g = EnvGuard::new(&[]);
         for env in ["staging", "testnet", "mainnet"] {
             let c =
                 zk_verifier::config::Builder::from_baked(BASE_CONFIG, env_overlay(env).unwrap())
