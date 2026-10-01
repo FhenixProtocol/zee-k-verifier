@@ -566,9 +566,8 @@ mod tests {
 
     #[test]
     fn config_env_mainnet_resolves_baked_partners() {
-        // The mainnet set is baked at six key-share holders, threshold 3. While any
-        // slot is an unfilled placeholder, partner_refs fails closed, so
-        // Config::from_env("mainnet") refuses rather than resolving a partial set.
+        // The mainnet set is baked at six key-share holders, threshold 3, and every
+        // slot is filled, so Config::from_env("mainnet") resolves all six.
         let src = cofhe_keys::reader::lookup("mainnet").expect("baked mainnet source");
         assert_eq!(src.partners.len(), 6);
         assert_eq!(src.partners[0].project_id, "fhenix-507307");
@@ -577,10 +576,12 @@ mod tests {
         let _g = EnvGuard::new(KEYS);
         set_required_envs();
         std::env::set_var("COFHE_ENV", "mainnet");
-        assert!(
-            Config::from_env().is_err(),
-            "mainnet has open partner slots; from_env must fail closed"
-        );
+        // `Config` is not `Debug`, so match rather than `expect`.
+        let cfg = match Config::from_env() {
+            Ok(cfg) => cfg,
+            Err(e) => panic!("mainnet must resolve its complete partner set: {e:#}"),
+        };
+        assert_eq!(cfg.partners.len(), 6);
     }
 
     #[test]
