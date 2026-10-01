@@ -549,11 +549,25 @@ mod tests {
         }
     }
 
+    /// The partner set is compiled in from the pinned `cofhe-keys` rev. A slot that is
+    /// still a placeholder at that rev makes `partner_refs` fail closed, so the image
+    /// cannot boot in that env, and only a boot in that env would show it. This runs
+    /// the boot's own `partner_refs` call for every baked env instead.
+    #[test]
+    fn every_baked_env_resolves_a_complete_partner_set() {
+        for name in cofhe_keys::reader::env_names() {
+            let src = cofhe_keys::reader::lookup(name).expect("baked source");
+            // `PartnerRef` is not `Debug`, so match rather than `expect`.
+            if let Err(e) = cofhe_keys::reader::partner_refs(src, "zee-k", ZK_SIGNER_SECRET) {
+                panic!("env {name:?} has an incomplete partner set at the pinned cofhe-keys rev: {e:#}");
+            }
+        }
+    }
+
     #[test]
     fn config_env_mainnet_resolves_baked_partners() {
-        // The mainnet set is baked at six key-share holders, threshold 3. While any
-        // slot is an unfilled placeholder, partner_refs fails closed, so
-        // Config::from_env("mainnet") refuses rather than resolving a partial set.
+        // The mainnet set is baked at six key-share holders, threshold 3, and every
+        // slot is filled, so Config::from_env("mainnet") resolves all six.
         let src = cofhe_keys::reader::lookup("mainnet").expect("baked mainnet source");
         assert_eq!(src.partners.len(), 6);
         assert_eq!(src.partners[0].project_id, "fhenix-507307");
@@ -562,10 +576,12 @@ mod tests {
         let _g = EnvGuard::new(KEYS);
         set_required_envs();
         std::env::set_var("COFHE_ENV", "mainnet");
-        assert!(
-            Config::from_env().is_err(),
-            "mainnet has open partner slots; from_env must fail closed"
-        );
+        // `Config` is not `Debug`, so match rather than `expect`.
+        let cfg = match Config::from_env() {
+            Ok(cfg) => cfg,
+            Err(e) => panic!("mainnet must resolve its complete partner set: {e:#}"),
+        };
+        assert_eq!(cfg.partners.len(), 6);
     }
 
     #[test]
