@@ -549,6 +549,21 @@ mod tests {
         }
     }
 
+    /// The partner set is compiled in from the pinned `cofhe-keys` rev. A slot that is
+    /// still a placeholder at that rev makes `partner_refs` fail closed, so the image
+    /// cannot boot in that env, and only a boot in that env would show it. This runs
+    /// the boot's own `partner_refs` call for every baked env instead.
+    #[test]
+    fn every_baked_env_resolves_a_complete_partner_set() {
+        for name in cofhe_keys::reader::env_names() {
+            let src = cofhe_keys::reader::lookup(name).expect("baked source");
+            // `PartnerRef` is not `Debug`, so match rather than `expect`.
+            if let Err(e) = cofhe_keys::reader::partner_refs(src, "zee-k", ZK_SIGNER_SECRET) {
+                panic!("env {name:?} has an incomplete partner set at the pinned cofhe-keys rev: {e:#}");
+            }
+        }
+    }
+
     #[test]
     fn config_env_mainnet_resolves_baked_partners() {
         // The mainnet set is baked at six key-share holders, threshold 3. While any
