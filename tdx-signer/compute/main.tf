@@ -96,7 +96,22 @@ resource "google_storage_bucket" "proofs" {
   project                     = var.compute_project_id
   location                    = var.region
   uniform_bucket_level_access = true
-  depends_on                  = [google_project_service.apis]
+  # "enforced" would reject the allUsers grant below.
+  public_access_prevention = "inherited"
+  depends_on               = [google_project_service.apis]
+}
+
+# Anyone can read and list the verified inputs, so a third party can check a
+# commitment offline. Object keys are onchain ctHashes and the objects are
+# ciphertexts: nothing here is secret. GCS writes no Data Access log entry for
+# anonymous reads, so this does not flood the audit trail below.
+# A pre-existing bucket with public_access_prevention = enforced refuses this
+# grant; turn that off on the bucket once, out of band, before apply.
+resource "google_storage_bucket_iam_member" "proofs_public_read" {
+  bucket     = var.proofs_bucket
+  role       = "roles/storage.objectViewer"
+  member     = "allUsers"
+  depends_on = [google_storage_bucket.proofs]
 }
 
 # Append-only access to the proofs bucket. GCS needs objects.delete to replace a
