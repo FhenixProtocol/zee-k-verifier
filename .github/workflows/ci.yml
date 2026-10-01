@@ -53,6 +53,31 @@ jobs:
       - name: test
         run: cargo test --release --locked
 
+  # Build the attested tdx-signer image from its Dockerfile and run it. The cargo
+  # jobs above build on the runner, not in the image, so they cannot see a fault
+  # between the build stage and the runtime stage, for example a binary that
+  # needs a newer glibc than the runtime has. Nothing is pushed from here.
+  image-boots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build tdx-signer image (amd64, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tdx-signer/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: tdx-signer:ci
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=ci-tdx-signer
+          cache-to: type=gha,mode=max,scope=ci-tdx-signer
+      - name: Image boots
+        run: ./scripts/check-image-boots.sh tdx-signer:ci
+
   # Supply-chain scan for the one crate that takes the private cofhe-keys git dep.
   supply-chain:
     name: supply-chain (tdx-signer)

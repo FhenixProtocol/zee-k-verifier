@@ -104,6 +104,15 @@ jobs:
           provenance: false
           sbom: false
 
+      # Run the exact pushed digest before it gets an attestation. Provenance
+      # proves who built an image, not that it starts. If this step fails, the
+      # attest step does not run, and a partner check on this digest refuses it.
+      # CI runs the same check on every pull request.
+      - name: Image boots
+        env:
+          IMAGE: ${{ vars.IMAGE_REGISTRY }}@${{ steps.push.outputs.digest }}
+        run: ./scripts/check-image-boots.sh "${IMAGE}"
+
       # The certificate Fulcio issues names this repo, this workflow, the ref and
       # the commit. Those are the four fields the partner asserts at pin time.
       #
@@ -167,8 +176,10 @@ jobs:
               echo "> ### NO ATTESTATION — DO NOT HAND THIS TO A PARTNER"
               echo ">"
               echo "> No provenance exists for this digest: the build was not on main,"
-              echo "> or the attestation step did not succeed. A partner check on it"
-              echo "> fails, and the failure reads like tampering."
+              echo "> or the boot check or the attestation step did not succeed. A"
+              echo "> partner check on it fails, and the failure reads like tampering."
+              echo "> If the \"Image boots\" step failed, the image is broken: fix the"
+              echo "> build, do not re-run it."
             else
               echo "### Hand these two values to each partner"
               echo
