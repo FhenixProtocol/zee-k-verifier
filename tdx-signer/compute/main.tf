@@ -16,7 +16,7 @@ terraform {
   # Partial backend config passed at init. compute-module state lives in the
   # COMPUTE project's bucket:
   #   terraform init -backend-config="bucket=<compute-project>-tfstate" \
-  #                  -backend-config="prefix=zeek/compute"
+  #                  -backend-config="prefix=zee-k-verifier/compute"
   backend "gcs" {}
   required_providers {
     google = {
