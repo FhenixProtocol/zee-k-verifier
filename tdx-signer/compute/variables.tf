@@ -54,7 +54,7 @@ variable "gke_pod_cidr" {
 
 variable "proofs_bucket" {
   type        = string
-  description = "Name of the GCS bucket where zee-k writes verified zk proof inputs. The compute SA is granted the append-only zeeKProofsAppender custom role (storage.objects.create plus storage.objects.get for the health probe)."
+  description = "Name of the GCS bucket where zee-k writes verified zk proof inputs. The compute SA is granted the append-only zeeKProofsAppender custom role (storage.objects.create plus storage.objects.get for the health probe). allUsers is granted roles/storage.objectViewer (public read and list)."
 }
 
 variable "create_proofs_bucket" {
