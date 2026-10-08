@@ -3,3 +3,7 @@
 # the compute SA write (terraform/compute).
 [storage]
 bucket = "fhenix-mainnet-zee-k-inputs"
+
+# Push metrics over OTLP (default off); the :9090 exposition is served either way.
+[metrics]
+push = true
