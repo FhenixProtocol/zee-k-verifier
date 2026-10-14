@@ -326,10 +326,18 @@ resource "google_compute_service_attachment" "ct_server" {
   name                  = "ct-server-attachment"
   region                = local.psc_region
   enable_proxy_protocol = false
-  connection_preference = "ACCEPT_AUTOMATIC"
+  connection_preference = "ACCEPT_MANUAL"
   nat_subnets           = [google_compute_subnetwork.psc_nat[0].self_link]
   target_service        = "https://www.googleapis.com/compute/v1/projects/${var.compute_project_id}/regions/${local.psc_region}/forwardingRules/${var.gke_ilb_forwarding_rule}"
   depends_on            = [google_project_service.apis]
+
+  # The private listener behind this attachment (/StoreCts, /internal/events/complete)
+  # has no auth, so only this project may connect. ACCEPT_AUTOMATIC let any GCP
+  # project that learned the attachment URI open an endpoint to it.
+  consumer_accept_lists {
+    project_id_or_num = var.compute_project_id
+    connection_limit  = 1
+  }
 
   lifecycle {
     precondition {
