@@ -76,6 +76,10 @@ pub struct ProofMetadata {
     pub ct_hashes: Vec<String>,
     pub ct_count: usize,
     pub timestamp: String,
+    /// The consuming contract the proof is bound to, as `0x` + 40 lowercase hex
+    /// digits whatever spelling the client sent. Objects written before this
+    /// field existed do not carry it; `verify-stored-ct` reads both layouts.
+    pub contract_addr: String,
 }
 
 impl From<&ProofMetadata> for HashMap<String, String> {

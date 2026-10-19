@@ -192,8 +192,14 @@ fn mint_body(
 ) -> String {
     let account_addr_bytes =
         hex::decode(account_addr.strip_prefix("0x").unwrap_or(account_addr)).expect("hex addr");
+    let contract_bytes = hex::decode(&STRESS_CONTRACT_ADDR[2..]).expect("hex contract");
     // Identical binding to what the verifier reconstructs on the server side.
-    let metadata = Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id);
+    let metadata = Verifier::reconstruct_metadata(
+        &account_addr_bytes,
+        security_zone,
+        chain_id,
+        &contract_bytes,
+    );
 
     let mut rng = rand::thread_rng();
     let proven = ProvenCompactCiphertextList::builder(pk)
@@ -204,9 +210,10 @@ fn mint_body(
 
     let packed_hex =
         hex::encode(rust_common::safe_serde::serialize(&proven).expect("serialize proof"));
-    // `contract_address` is required — the consuming contract is bound into every
-    // signed message. Any address works for load generation: it only has to be
-    // present and 20 bytes, since nothing here recovers the signature on-chain.
+    // `contract_address` is required — the consuming contract is bound into the
+    // proof metadata and into every signed message, so it must be the address the
+    // proof above was minted with. Any 20-byte address works for load generation,
+    // since nothing here recovers the signature on-chain.
     format!(
         r#"{{"packed_list":"{}","account_addr":"{}","security_zone":{},"chain_id":{},"contract_address":"{}"}}"#,
         packed_hex, account_addr, security_zone, chain_id, STRESS_CONTRACT_ADDR

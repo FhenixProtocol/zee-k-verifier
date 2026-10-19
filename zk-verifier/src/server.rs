@@ -253,7 +253,12 @@ mod tests {
         let security_zone = 1u8;
         let chain_id = 11155111u32;
         let contract_address = "0x00000000000000000000000000000000000000aa";
-        let metadata = Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id);
+        let metadata = Verifier::reconstruct_metadata(
+            &account_addr_bytes,
+            security_zone,
+            chain_id,
+            &hex::decode(&contract_address[2..]).unwrap(),
+        );
 
         let proven_list = create_proven_list(&public_key, &crs, &metadata);
         let packed_list_bytes = rust_common::safe_serde::serialize(&proven_list).unwrap();
@@ -334,7 +339,12 @@ mod tests {
         let contract_addr = "0x00000000000000000000000000000000000000aa";
         let security_zone = 1u8;
         let chain_id = 11155111u32;
-        let metadata = Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id);
+        let metadata = Verifier::reconstruct_metadata(
+            &account_addr_bytes,
+            security_zone,
+            chain_id,
+            &hex::decode(&contract_addr[2..]).unwrap(),
+        );
 
         // Same as create_proven_list, but with nothing pushed into the builder.
         let empty_list = tfhe::ProvenCompactCiphertextList::builder(&public_key)
@@ -379,7 +389,12 @@ mod tests {
         let security_zone = 1u8;
         let chain_id = 11155111u32;
         let contract_address = "0x00000000000000000000000000000000000000aa";
-        let metadata = Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id);
+        let metadata = Verifier::reconstruct_metadata(
+            &account_addr_bytes,
+            security_zone,
+            chain_id,
+            &hex::decode(&contract_address[2..]).unwrap(),
+        );
         let proven_list = create_proven_list(&public_key, &crs, &metadata);
         let packed_list_hex =
             hex::encode(rust_common::safe_serde::serialize(&proven_list).unwrap());

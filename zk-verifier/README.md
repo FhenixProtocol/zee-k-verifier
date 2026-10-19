@@ -31,13 +31,13 @@ The request fields are defined by `VerifyRequest` in `zk-verifier/src/api/mod.rs
 
 Two contracts a client must honor:
 
-- `contract_address` is **required**. The service binds it into every signed message. A verified input cannot be replayed into a different contract.
+- `contract_address` is **required**. It is part of the proof metadata and of every signed message, so a proof verifies only for the contract it was built for.
 - The service rejects a `packed_list` with **zero ciphertexts** with `400`. A batch of zero has no digest to commit to. Folding zero hashes yields the constant `keccak256("")`, so a signature over it would say nothing about the account, the chain, or the request.
 
 When you build the `ProvenCompactCiphertextList`, construct its metadata bytes in this order:
 
 ```
-[security_zone (1 byte)][account_addr (bytes)][chain_id (32 bytes, big-endian)]
+[security_zone (1 byte)][account_addr (bytes)][chain_id (32 bytes, big-endian)][contract_address (20 bytes)]
 ```
 
 ### Response
