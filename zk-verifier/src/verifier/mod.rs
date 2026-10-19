@@ -73,6 +73,15 @@ impl Verifier {
         trace!("Decoded account address: {} bytes: {:?}", account_addr, account_addr_bytes);
         let contract_addr_bytes =
             hex::decode(contract_addr.strip_prefix("0x").unwrap_or(contract_addr))?;
+        // An EVM address, exactly. An empty value would rebuild the metadata
+        // layout that predates the contract field, and any other length is not
+        // an address a contract could ever match.
+        if contract_addr_bytes.len() != 20 {
+            return Err(VerifierError::InvalidInput(format!(
+                "contract_addr must be 20 bytes, got {}",
+                contract_addr_bytes.len()
+            )));
+        }
         let metadata = Self::reconstruct_metadata(
             &account_addr_bytes,
             security_zone,
@@ -326,6 +335,46 @@ mod tests {
             ),
             Err(VerifierError::ProofVerificationError(_))
         ));
+    }
+
+    /// `contract_addr` must decode to exactly 20 bytes. An empty address would
+    /// reproduce the previous metadata layout, and a short or long one is not an
+    /// EVM address, so both are refused before the proof is checked.
+    #[test]
+    fn contract_addr_must_be_20_bytes() {
+        let (crs, server_key, public_key) = setup_tfhers();
+        let account_addr = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+        let account_addr_bytes = hex::decode(&account_addr[2..]).unwrap();
+        let (security_zone, chain_id) = (0u8, 420105u32);
+
+        // A proof over the previous layout: with an empty contract the
+        // reconstructed metadata would match it.
+        let legacy_metadata =
+            Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id, &[]);
+        let proven = create_proven_list(&public_key, &crs, &legacy_metadata);
+        let proof_bytes = rust_common::safe_serde::serialize(&proven).unwrap();
+
+        set_server_key(server_key);
+        let verifier =
+            Verifier::new(crs.clone(), public_key.clone(), Signer::from_bytes(&[1u8; 32]).unwrap());
+        for bad in
+            ["", "0x", "0xaa", &format!("0x{}", "aa".repeat(19)), &format!("0x{}", "aa".repeat(21))]
+        {
+            let same_proof = rust_common::safe_serde::deserialize(&proof_bytes).unwrap();
+            assert!(
+                matches!(
+                    verifier.verify_and_sign_batch(
+                        same_proof,
+                        account_addr,
+                        security_zone,
+                        chain_id,
+                        bad
+                    ),
+                    Err(VerifierError::InvalidInput(_))
+                ),
+                "accepted contract address {bad:?}"
+            );
+        }
     }
 
     /// A proof built over the previous metadata layout (no contract) does not
