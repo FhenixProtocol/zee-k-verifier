@@ -23,7 +23,7 @@ http = "=1.4.0"
 # Pulled in only to install a process-level rustls CryptoProvider at startup:
 # google-cloud-storage's rustls (0.23) panics if it can't auto-pick one when
 # both ring and aws-lc-rs are in the dependency tree.
-rustls = { version = "=0.23.45", default-features = false, features = ["ring"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 tokio = { version = "=1.52.1", features = ["macros", "rt-multi-thread", "signal"] }
