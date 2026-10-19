@@ -95,6 +95,18 @@ fn adjust_hash_for_metadata(
     hash
 }
 
+/// `0x` + 40 lowercase hex digits, decoded once from however the client spelled
+/// it (`0x` optional, any case). The verifier, the signed digest and the stored
+/// metadata all receive this one form.
+fn canonical_contract_address(raw: &str) -> Result<String, String> {
+    let bytes = hex_crate::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .map_err(|e| format!("contract_address is not hex: {e}"))?;
+    if bytes.len() != 20 {
+        return Err(format!("contract_address must be 20 bytes, got {}", bytes.len()));
+    }
+    Ok(format!("0x{}", hex_crate::encode(bytes)))
+}
+
 /// Represents the outcome of a storage operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -675,6 +687,17 @@ async fn verify_and_sign_batch(
         account_addr, security_zone, chain_id, contract_address
     );
 
+    // Canonicalised before the proof is verified: one spelling reaches the
+    // verifier, the signed digest and the stored metadata, and a malformed
+    // address is refused before it costs any CPU.
+    let contract_address = match canonical_contract_address(&contract_address) {
+        Ok(canonical) => canonical,
+        Err(message) => {
+            return (StatusCode::BAD_REQUEST, Json(BatchVerifyResponse::Error { message }))
+                .into_response()
+        }
+    };
+
     let (pl, addr, contract) =
         (packed_list_bytes.clone(), account_addr.clone(), contract_address.clone());
     let result = match gated_verify(&state, move |st| {
@@ -883,6 +906,27 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// One spelling of the contract address reaches the verifier, the signed
+    /// digest and the stored metadata: `0x` + 40 lowercase hex digits.
+    #[test]
+    fn contract_address_is_canonicalised_to_lowercase_0x_hex() {
+        let canonical = "0x00000000000000000000000000000000000000aa";
+        for spelling in [
+            "0x00000000000000000000000000000000000000AA",
+            "00000000000000000000000000000000000000aa",
+            "0x00000000000000000000000000000000000000aa",
+        ] {
+            assert_eq!(
+                canonical_contract_address(spelling).as_deref(),
+                Ok(canonical),
+                "{spelling}"
+            );
+        }
+        for bad in ["", "0x", "0xaa", &format!("0x{}", "aa".repeat(21)), "0xzz"] {
+            assert!(canonical_contract_address(bad).is_err(), "accepted {bad:?}");
+        }
+    }
 
     #[test]
     fn batch_verify_success_shape_is_stable() {

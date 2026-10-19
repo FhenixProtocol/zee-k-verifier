@@ -94,9 +94,14 @@ impl Verifier {
             let _t = crate::telemetry::StepTimer::start("verify_and_expand");
             proven_cts.verify_and_expand(&self.crs, &self.pk, &metadata).map_err(|e| {
                 error!("Failed to verify packed list: {}", e);
+                // During the cutover every dApp on an older SDK lands here, so
+                // the message says what the proof lacks and what to do. No
+                // second verify against the previous layout: it would double
+                // the CPU cost of a bad request.
                 VerifierError::ProofVerificationError(format!(
-                    "could not verify packed list: {}",
-                    e
+                    "could not verify packed list: {e}; the proof metadata must end with \
+                     contract_address (security_zone || account || chain_id || contract), a proof \
+                     from an older @cofhe/sdk is built without it: upgrade the SDK"
                 ))
             })?
         };
@@ -397,10 +402,16 @@ mod tests {
         set_server_key(server_key);
         let verifier =
             Verifier::new(crs.clone(), public_key.clone(), Signer::from_bytes(&[1u8; 32]).unwrap());
-        assert!(matches!(
-            verifier.verify_and_sign_batch(proven, account_addr, security_zone, chain_id, contract),
-            Err(VerifierError::ProofVerificationError(_))
-        ));
+        let err = verifier
+            .verify_and_sign_batch(proven, account_addr, security_zone, chain_id, contract)
+            .err()
+            .expect("a contract-less proof must not verify");
+        assert!(matches!(err, VerifierError::ProofVerificationError(_)));
+        // Every dApp on an older SDK sees this error during the cutover, so it
+        // says what is missing and what to do.
+        let message = err.to_string();
+        assert!(message.contains("contract_address"), "no hint in: {message}");
+        assert!(message.contains("@cofhe/sdk"), "no upgrade hint in: {message}");
     }
 
     #[test]

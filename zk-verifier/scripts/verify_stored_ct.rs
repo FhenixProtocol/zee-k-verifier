@@ -953,3 +953,67 @@ fn print_human_readable(result: &VerificationResult) {
     }
     println!("{}", "=".repeat(60));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The layout written before `contract_addr` existed, as a writer.
+    #[derive(Serialize)]
+    struct OldProofMetadata {
+        proof_id: String,
+        account_addr: String,
+        security_zone: u8,
+        chain_id: u32,
+        ct_hashes: Vec<String>,
+        ct_count: usize,
+        timestamp: String,
+    }
+
+    #[derive(Serialize)]
+    struct OldStoredProof {
+        metadata: OldProofMetadata,
+        proof_data: Vec<u8>,
+    }
+
+    /// `from_bytes` tries the current layout first. bincode accepts trailing
+    /// bytes, so a current object also parses as the previous layout, with the
+    /// `contract_addr` string taken as `proof_data`. Both round trips must give
+    /// back the bytes that were written, which fails if the two branches are
+    /// ever swapped.
+    #[test]
+    fn from_bytes_reads_current_and_previous_layouts() {
+        let current = StoredProof {
+            metadata: ProofMetadata {
+                proof_id: "0xproof".to_string(),
+                account_addr: "0xaccount".to_string(),
+                security_zone: 0,
+                chain_id: 420105,
+                ct_hashes: vec!["0xhash".to_string()],
+                ct_count: 1,
+                timestamp: "2026-10-19T00:00:00Z".to_string(),
+                contract_addr: "0x00000000000000000000000000000000000000aa".to_string(),
+            },
+            proof_data: vec![1, 2, 3, 4],
+        };
+        let back = StoredProof::from_bytes(&bincode::serialize(&current).unwrap()).unwrap();
+        assert_eq!(back.proof_data, vec![1, 2, 3, 4]);
+        assert_eq!(back.metadata.contract_addr, "0x00000000000000000000000000000000000000aa");
+
+        let previous = OldStoredProof {
+            metadata: OldProofMetadata {
+                proof_id: "0xproof".to_string(),
+                account_addr: "0xaccount".to_string(),
+                security_zone: 0,
+                chain_id: 420105,
+                ct_hashes: vec!["0xhash".to_string()],
+                ct_count: 1,
+                timestamp: "2026-10-19T00:00:00Z".to_string(),
+            },
+            proof_data: vec![9, 8, 7],
+        };
+        let back = StoredProof::from_bytes(&bincode::serialize(&previous).unwrap()).unwrap();
+        assert_eq!(back.proof_data, vec![9, 8, 7]);
+        assert_eq!(back.metadata.contract_addr, "");
+    }
+}
