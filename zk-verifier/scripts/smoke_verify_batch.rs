@@ -102,8 +102,13 @@ fn per_ct_message_hash(
 }
 
 /// The metadata the ZK proof is bound to (verifier::reconstruct_metadata):
-/// security_zone || account || chain_id_padded.
-fn reconstruct_metadata(account: &[u8], security_zone: u8, chain_id: u32) -> Vec<u8> {
+/// security_zone || account || chain_id_padded || contract.
+fn reconstruct_metadata(
+    account: &[u8],
+    security_zone: u8,
+    chain_id: u32,
+    contract: &[u8],
+) -> Vec<u8> {
     let mut chain_id_padded = [0u8; 32];
     chain_id_padded[28..].copy_from_slice(&chain_id.to_be_bytes());
 
@@ -111,6 +116,7 @@ fn reconstruct_metadata(account: &[u8], security_zone: u8, chain_id: u32) -> Vec
     m.push(security_zone);
     m.extend_from_slice(account);
     m.extend_from_slice(&chain_id_padded);
+    m.extend_from_slice(contract);
     m
 }
 
@@ -165,7 +171,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let pk: CompactPublicKey = load(&args.pk, "public key")?;
 
     eprintln!("Building proven CT list for values {:?} as {}...", args.values, args.fhe_type);
-    let metadata = reconstruct_metadata(&account_bytes, args.security_zone, args.chain_id);
+    let metadata =
+        reconstruct_metadata(&account_bytes, args.security_zone, args.chain_id, &contract_bytes);
     let mut builder = ProvenCompactCiphertextList::builder(&pk);
     for &v in &args.values {
         // Push each value as the requested FHE type; the concrete Rust type

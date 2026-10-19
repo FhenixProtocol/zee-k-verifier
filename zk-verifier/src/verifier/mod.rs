@@ -73,7 +73,12 @@ impl Verifier {
         trace!("Decoded account address: {} bytes: {:?}", account_addr, account_addr_bytes);
         let contract_addr_bytes =
             hex::decode(contract_addr.strip_prefix("0x").unwrap_or(contract_addr))?;
-        let metadata = Self::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id);
+        let metadata = Self::reconstruct_metadata(
+            &account_addr_bytes,
+            security_zone,
+            chain_id,
+            &contract_addr_bytes,
+        );
         trace!("Reconstructed metadata: {:?}", metadata);
 
         let expander = {
@@ -193,21 +198,36 @@ impl Verifier {
         Ok(VerifiedBatch { cts, signature, recid })
     }
 
-    pub fn reconstruct_metadata(account_addr: &[u8], security_zone: u8, chain_id: u32) -> Vec<u8> {
+    /// The byte string the ZK proof is bound to:
+    /// `security_zone (1) || account_addr || chain_id (32, big-endian) || contract_addr`.
+    ///
+    /// The consuming contract is part of the proof, not only of the signed
+    /// message, so a proof verifies for exactly the (account, chain, contract)
+    /// tuple its author named. The SDK builds the same bytes.
+    pub fn reconstruct_metadata(
+        account_addr: &[u8],
+        security_zone: u8,
+        chain_id: u32,
+        contract_addr: &[u8],
+    ) -> Vec<u8> {
         trace!(
-            "Reconstructing metadata for account {:?} with security zone {} and chain id {}",
+            "Reconstructing metadata for account {:?} with security zone {}, chain id {} and \
+             contract {:?}",
             account_addr,
             security_zone,
-            chain_id
+            chain_id,
+            contract_addr
         );
 
         let mut chain_id_bytes = [0u8; 32];
         chain_id_bytes[28..].copy_from_slice(&chain_id.to_be_bytes());
 
-        let mut metadata_bytes = Vec::new();
+        let mut metadata_bytes =
+            Vec::with_capacity(1 + account_addr.len() + chain_id_bytes.len() + contract_addr.len());
         metadata_bytes.push(security_zone);
         metadata_bytes.extend_from_slice(account_addr);
         metadata_bytes.extend_from_slice(&chain_id_bytes);
+        metadata_bytes.extend_from_slice(contract_addr);
         metadata_bytes
     }
 
@@ -248,6 +268,7 @@ mod tests {
         let account_addr = "0xfff123";
         let account_addr_bytes =
             hex::decode(account_addr.strip_prefix("0x").unwrap_or(account_addr)).unwrap();
+        let contract_addr_bytes = hex::decode("00000000000000000000000000000000000000aa").unwrap();
         let security_zone = 0u8;
         let chain_id = 11155111u32;
         let mut chain_id_bytes = [0u8; 32]; // Initialize 256-bit array
@@ -256,10 +277,81 @@ mod tests {
         metadata.push(security_zone);
         metadata.extend_from_slice(&account_addr_bytes);
         metadata.extend_from_slice(&chain_id_bytes);
+        metadata.extend_from_slice(&contract_addr_bytes);
         assert_eq!(
-            Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id),
+            Verifier::reconstruct_metadata(
+                &account_addr_bytes,
+                security_zone,
+                chain_id,
+                &contract_addr_bytes
+            ),
             metadata
         );
+    }
+
+    /// The proof commits to the consuming contract. The same proof verifies for
+    /// the contract its metadata names and for no other.
+    #[test]
+    fn proof_verifies_only_for_the_contract_in_its_metadata() {
+        let (crs, server_key, public_key) = setup_tfhers();
+        let account_addr = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+        let account_addr_bytes = hex::decode(&account_addr[2..]).unwrap();
+        let (security_zone, chain_id) = (0u8, 420105u32);
+        let bound_to = "0x00000000000000000000000000000000000000aa";
+        let other = "0x00000000000000000000000000000000000000ee";
+        let metadata = Verifier::reconstruct_metadata(
+            &account_addr_bytes,
+            security_zone,
+            chain_id,
+            &hex::decode(&bound_to[2..]).unwrap(),
+        );
+        let proven = create_proven_list(&public_key, &crs, &metadata);
+        let proof_bytes = rust_common::safe_serde::serialize(&proven).unwrap();
+
+        set_server_key(server_key);
+        let verifier =
+            Verifier::new(crs.clone(), public_key.clone(), Signer::from_bytes(&[1u8; 32]).unwrap());
+
+        let same_proof = || rust_common::safe_serde::deserialize(&proof_bytes).unwrap();
+        assert!(verifier
+            .verify_and_sign_batch(same_proof(), account_addr, security_zone, chain_id, bound_to)
+            .is_ok());
+        assert!(matches!(
+            verifier.verify_and_sign_batch(
+                same_proof(),
+                account_addr,
+                security_zone,
+                chain_id,
+                other
+            ),
+            Err(VerifierError::ProofVerificationError(_))
+        ));
+    }
+
+    /// A proof built over the previous metadata layout (no contract) does not
+    /// verify: there is no contract-less path.
+    #[test]
+    fn proof_without_contract_in_metadata_is_rejected() {
+        let (crs, server_key, public_key) = setup_tfhers();
+        let account_addr = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+        let account_addr_bytes = hex::decode(&account_addr[2..]).unwrap();
+        let (security_zone, chain_id) = (0u8, 420105u32);
+        let contract = "0x00000000000000000000000000000000000000aa";
+
+        let mut legacy_metadata = vec![security_zone];
+        legacy_metadata.extend_from_slice(&account_addr_bytes);
+        let mut chain_id_bytes = [0u8; 32];
+        chain_id_bytes[28..].copy_from_slice(&chain_id.to_be_bytes());
+        legacy_metadata.extend_from_slice(&chain_id_bytes);
+        let proven = create_proven_list(&public_key, &crs, &legacy_metadata);
+
+        set_server_key(server_key);
+        let verifier =
+            Verifier::new(crs.clone(), public_key.clone(), Signer::from_bytes(&[1u8; 32]).unwrap());
+        assert!(matches!(
+            verifier.verify_and_sign_batch(proven, account_addr, security_zone, chain_id, contract),
+            Err(VerifierError::ProofVerificationError(_))
+        ));
     }
 
     #[test]
@@ -274,7 +366,12 @@ mod tests {
             hex::decode(contract_addr.strip_prefix("0x").unwrap_or(contract_addr)).unwrap();
         let security_zone = 0u8;
         let chain_id = 11155111u32;
-        let metadata = Verifier::reconstruct_metadata(&account_addr_bytes, security_zone, chain_id);
+        let metadata = Verifier::reconstruct_metadata(
+            &account_addr_bytes,
+            security_zone,
+            chain_id,
+            &contract_addr_bytes,
+        );
 
         let proven_batch = create_proven_list(&public_key, &crs, &metadata);
 

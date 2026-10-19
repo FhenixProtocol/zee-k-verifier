@@ -95,6 +95,9 @@ struct ProofMetadata {
     ct_hashes: Vec<String>,
     ct_count: usize,
     timestamp: String,
+    /// The consuming contract the proof is bound to. Empty for a proof stored
+    /// before the field existed: its metadata carries no contract.
+    contract_addr: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,9 +106,49 @@ struct StoredProof {
     proof_data: Vec<u8>,
 }
 
+/// The layout of proofs stored before `contract_addr` existed.
+#[derive(Debug, Deserialize)]
+struct LegacyProofMetadata {
+    proof_id: String,
+    account_addr: String,
+    security_zone: u8,
+    chain_id: u32,
+    ct_hashes: Vec<String>,
+    ct_count: usize,
+    timestamp: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyStoredProof {
+    metadata: LegacyProofMetadata,
+    proof_data: Vec<u8>,
+}
+
 impl StoredProof {
+    /// Current layout first, previous layout second. A previous-layout object
+    /// cannot parse as the current one: its proof bytes land where
+    /// `contract_addr` is read and nothing is left for `proof_data`. The reverse
+    /// is not true, so the order matters.
     fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(bytes).map_err(|e| format!("Failed to deserialize StoredProof: {}", e))
+        if let Ok(current) = bincode::deserialize::<StoredProof>(bytes) {
+            return Ok(current);
+        }
+        let legacy: LegacyStoredProof = bincode::deserialize(bytes)
+            .map_err(|e| format!("Failed to deserialize StoredProof: {}", e))?;
+        let m = legacy.metadata;
+        Ok(StoredProof {
+            metadata: ProofMetadata {
+                proof_id: m.proof_id,
+                account_addr: m.account_addr,
+                security_zone: m.security_zone,
+                chain_id: m.chain_id,
+                ct_hashes: m.ct_hashes,
+                ct_count: m.ct_count,
+                timestamp: m.timestamp,
+                contract_addr: String::new(),
+            },
+            proof_data: legacy.proof_data,
+        })
     }
 }
 
@@ -334,8 +377,16 @@ impl SerializeIndex for tfhe::CompactCiphertextListExpander {
     }
 }
 
-/// Reconstruct metadata for proof verification (matching TFHE.rs expectations)
-fn reconstruct_metadata(account_addr: &[u8], security_zone: u8, chain_id: u32) -> Vec<u8> {
+/// Reconstruct metadata for proof verification (matching TFHE.rs expectations):
+/// `security_zone || account_addr || chain_id (32, big-endian) || contract_addr`.
+/// An empty `contract_addr` reproduces the layout used before the field existed,
+/// which is what a proof stored under that layout needs.
+fn reconstruct_metadata(
+    account_addr: &[u8],
+    security_zone: u8,
+    chain_id: u32,
+    contract_addr: &[u8],
+) -> Vec<u8> {
     let mut chain_id_bytes = [0u8; 32];
     chain_id_bytes[28..].copy_from_slice(&chain_id.to_be_bytes());
 
@@ -343,6 +394,7 @@ fn reconstruct_metadata(account_addr: &[u8], security_zone: u8, chain_id: u32) -
     metadata_bytes.push(security_zone);
     metadata_bytes.extend_from_slice(account_addr);
     metadata_bytes.extend_from_slice(&chain_id_bytes);
+    metadata_bytes.extend_from_slice(contract_addr);
 
     metadata_bytes
 }
@@ -355,6 +407,7 @@ fn verify_and_extract_hashes(
     account_addr: &str,
     security_zone: u8,
     chain_id: u32,
+    contract_addr: &str,
 ) -> Result<Vec<VerifiedCt>, String> {
     // Convert account address to bytes (remove 0x prefix if present)
     let account_bytes = hex::decode(account_addr.strip_prefix("0x").unwrap_or(account_addr))
@@ -364,8 +417,13 @@ fn verify_and_extract_hashes(
         return Err(format!("Account address must be 20 bytes, got {}", account_bytes.len()));
     }
 
+    // The consuming contract the proof is bound to; empty for a proof stored
+    // before the field existed.
+    let contract_bytes = hex::decode(contract_addr.strip_prefix("0x").unwrap_or(contract_addr))
+        .map_err(|e| format!("Invalid contract address: {}", e))?;
+
     // Reconstruct metadata for verification
-    let metadata = reconstruct_metadata(&account_bytes, security_zone, chain_id);
+    let metadata = reconstruct_metadata(&account_bytes, security_zone, chain_id, &contract_bytes);
 
     // Verify the ZK proof and expand in one step
     let expander = proven_list
@@ -685,10 +743,12 @@ async fn run_verification(
     .map_err(|e| format!("Failed to fetch proof: {}", e))?;
 
     info!(
-        "Verifying proof with metadata (account: {}, security_zone: {}, chain_id: {})",
+        "Verifying proof with metadata (account: {}, security_zone: {}, chain_id: {}, contract: \
+         {})",
         stored_ct.metadata.account_addr,
         stored_ct.metadata.security_zone,
-        stored_ct.metadata.chain_id
+        stored_ct.metadata.chain_id,
+        stored_proof.metadata.contract_addr
     );
 
     // Deserialize the proof
@@ -704,6 +764,7 @@ async fn run_verification(
         &stored_ct.metadata.account_addr,
         stored_ct.metadata.security_zone,
         stored_ct.metadata.chain_id,
+        &stored_proof.metadata.contract_addr,
     )
     .map_err(|e| format!("Proof verification failed: {}", e))?;
 

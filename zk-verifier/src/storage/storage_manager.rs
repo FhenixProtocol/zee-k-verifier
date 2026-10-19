@@ -68,6 +68,7 @@ impl StorageManager {
         account_addr: &str,
         security_zone: u8,
         chain_id: u32,
+        contract_addr: &str,
     ) -> StorageResult<String> {
         let proof_id = Self::calculate_proof_id(proven_list_bytes);
         let timestamp = Utc::now().to_rfc3339();
@@ -126,6 +127,7 @@ impl StorageManager {
             ct_hashes,
             ct_count,
             timestamp,
+            contract_addr: contract_addr.to_string(),
         };
 
         let proof_bytes_vec = proven_list_bytes.to_vec();
@@ -438,7 +440,14 @@ mod tests {
         ];
 
         let result = proof_storage
-            .store_proof_and_cts(proof_bytes, ct_data.clone(), "0x1234567890abcdef", 1, 11155111)
+            .store_proof_and_cts(
+                proof_bytes,
+                ct_data.clone(),
+                "0x1234567890abcdef",
+                1,
+                11155111,
+                "0x00000000000000000000000000000000000000aa",
+            )
             .await;
 
         assert!(result.is_ok());
@@ -497,7 +506,16 @@ mod tests {
             ("0xhash2".to_string(), b"ct2".to_vec(), 5u8),
         ];
 
-        let result = proof_storage.store_proof_and_cts(proof_bytes, ct_data, "0xaddr", 1, 1).await;
+        let result = proof_storage
+            .store_proof_and_cts(
+                proof_bytes,
+                ct_data,
+                "0xaddr",
+                1,
+                1,
+                "0x00000000000000000000000000000000000000aa",
+            )
+            .await;
 
         assert!(result.is_ok());
 
@@ -523,7 +541,16 @@ mod tests {
         let proof_bytes = b"test";
         let ct_data = vec![("0xhash1".to_string(), b"ct1".to_vec(), 5u8)];
 
-        let result = proof_storage.store_proof_and_cts(proof_bytes, ct_data, "0xaddr", 1, 1).await;
+        let result = proof_storage
+            .store_proof_and_cts(
+                proof_bytes,
+                ct_data,
+                "0xaddr",
+                1,
+                1,
+                "0x00000000000000000000000000000000000000aa",
+            )
+            .await;
 
         // Should succeed after retries
         assert!(result.is_ok());
@@ -577,7 +604,14 @@ mod tests {
                 let manager = StorageManager::new(storage, Some(retry_config));
                 let ct_data = vec![("0xdeadbeefcafe".to_string(), b"ct".to_vec(), 5u8)];
                 manager
-                    .store_proof_and_cts(b"proof", ct_data, "0xaddr", 1, 1)
+                    .store_proof_and_cts(
+                        b"proof",
+                        ct_data,
+                        "0xaddr",
+                        1,
+                        1,
+                        "0x00000000000000000000000000000000000000aa",
+                    )
                     .await
                     .expect("succeeds after a retry");
             });
@@ -618,7 +652,16 @@ mod tests {
         let proof_bytes = b"test";
         let ct_data = vec![("0xhash1".to_string(), b"ct1".to_vec(), 5u8)];
 
-        let result = proof_storage.store_proof_and_cts(proof_bytes, ct_data, "0xaddr", 1, 1).await;
+        let result = proof_storage
+            .store_proof_and_cts(
+                proof_bytes,
+                ct_data,
+                "0xaddr",
+                1,
+                1,
+                "0x00000000000000000000000000000000000000aa",
+            )
+            .await;
 
         // Should fail after exhausting retries
         assert!(result.is_err());
@@ -641,7 +684,16 @@ mod tests {
         let proof_bytes = b"test proof";
         let ct_data = vec![("0xhash1".to_string(), b"ct1".to_vec(), 5u8)];
 
-        let result = proof_storage.store_proof_and_cts(proof_bytes, ct_data, "0xaddr", 1, 1).await;
+        let result = proof_storage
+            .store_proof_and_cts(
+                proof_bytes,
+                ct_data,
+                "0xaddr",
+                1,
+                1,
+                "0x00000000000000000000000000000000000000aa",
+            )
+            .await;
 
         // Should fail because one upload failed
         assert!(result.is_err());
@@ -665,8 +717,16 @@ mod tests {
             ("0xhash3".to_string(), b"ct3".to_vec(), 5u8),
         ];
 
-        let result =
-            proof_storage.store_proof_and_cts(proof_bytes, ct_data, "0xaccount", 2, 42161).await;
+        let result = proof_storage
+            .store_proof_and_cts(
+                proof_bytes,
+                ct_data,
+                "0xaccount",
+                2,
+                42161,
+                "0x00000000000000000000000000000000000000aa",
+            )
+            .await;
 
         assert!(result.is_ok());
         let proof_id = result.unwrap();
@@ -763,6 +823,7 @@ mod tests {
             ct_hashes: vec!["0xhash1".to_string(), "0xhash2".to_string()],
             ct_count: 2,
             timestamp: "2024-01-15T10:30:00Z".to_string(),
+            contract_addr: "0x00000000000000000000000000000000000000aa".to_string(),
         };
 
         let proof_data = b"test proof binary data".to_vec();
@@ -790,6 +851,7 @@ mod tests {
             ct_hashes: vec!["0xhash1".to_string(), "0xhash2".to_string()],
             ct_count: 2,
             timestamp: "2024-01-15T10:30:00Z".to_string(),
+            contract_addr: "0x00000000000000000000000000000000000000aa".to_string(),
         };
 
         let json = serde_json::to_string(&metadata).unwrap();

@@ -528,6 +528,7 @@ async fn persist_cts(
     account_addr: &str,
     security_zone: u8,
     chain_id: u32,
+    contract_addr: &str,
 ) -> std::result::Result<(), (StatusCode, String)> {
     // Unified storage logic: external storage and StoreCTS endpoint in parallel
     // Both must succeed if enabled.
@@ -571,6 +572,7 @@ async fn persist_cts(
                     account_addr,
                     security_zone,
                     chain_id,
+                    contract_addr,
                 )
                 .await
                 .map_err(|e| {
@@ -693,9 +695,16 @@ async fn verify_and_sign_batch(
 
     log_verified(&result.cts, &account_addr, security_zone, chain_id);
 
-    if let Err((status, message)) =
-        persist_cts(&state, &packed_list_bytes, &result.cts, &account_addr, security_zone, chain_id)
-            .await
+    if let Err((status, message)) = persist_cts(
+        &state,
+        &packed_list_bytes,
+        &result.cts,
+        &account_addr,
+        security_zone,
+        chain_id,
+        &contract_address,
+    )
+    .await
     {
         return (status, Json(BatchVerifyResponse::Error { message })).into_response();
     }
