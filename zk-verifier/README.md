@@ -82,7 +82,7 @@ One signature covers the whole batch, so it verifies all-or-nothing. To prove a 
 
 With external storage on, the service stores each verified ciphertext and its proof in GCS, so a client can audit them later.
 
-- The object-path layout (`cofhe/v{n}/chain/…/security-zone/…`) is built in `zk-verifier/src/storage/storage_manager.rs`.
+- The object-path layout (`cofhe/v{n}/chain/…/security-zone/…`) is built in `zk-verifier/src/storage/storage_manager.rs`. New objects go under `cofhe/v2`; `verify-stored-ct` looks under `cofhe/v2` first and `cofhe/v1` second, so inputs written before the bump stay auditable.
 - The stored object formats (`StoredCiphertext`, `StoredProof`, and their metadata) are defined in `zk-verifier/src/storage/types.rs`.
 - The stored ciphertext hash embeds metadata in bytes 30–31 (ct type plus a trivially-encrypted flag, then security zone). That adjustment is `adjust_hash_for_metadata` in `zk-verifier/src/api/mod.rs`.
 

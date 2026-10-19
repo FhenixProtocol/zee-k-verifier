@@ -690,7 +690,7 @@ async fn run_verification(
     tfhe::set_server_key(server_key);
 
     // Fetch CT using the provided hash (adjusted hash is the storage key) and extracted security zone
-    let stored_ct = fetch_ciphertext(
+    let (stored_ct, prefix) = fetch_ciphertext(
         &storage,
         &parent,
         ct_hash, // Use the provided hash directly as the storage key
@@ -700,7 +700,7 @@ async fn run_verification(
     .await
     .map_err(|e| format!("Failed to fetch ciphertext: {}", e))?;
 
-    info!("Found CT in security zone {}", security_zone);
+    info!("Found CT under {} in security zone {}", prefix, security_zone);
 
     info!("Found CT with proof_id: {}", stored_ct.metadata.proof_id);
 
@@ -738,6 +738,7 @@ async fn run_verification(
         &stored_ct.metadata.proof_id,
         stored_ct.metadata.chain_id,
         stored_ct.metadata.security_zone,
+        prefix,
     )
     .await
     .map_err(|e| format!("Failed to fetch proof: {}", e))?;
@@ -855,24 +856,43 @@ async fn run_verification(
     })
 }
 
+/// Prefixes the verifier has written under, newest first. An object is looked
+/// up under each in turn, so inputs stored before a prefix bump stay auditable.
+const STORAGE_PREFIXES: [&str; 2] = ["cofhe/v2", "cofhe/v1"];
+
+/// `{prefix}/chain/{chain_id}/security-zone/{zone}/{object_type}`: the layout
+/// `StorageManager::build_base_path` writes.
+fn storage_base_path(prefix: &str, chain_id: u32, security_zone: u8, object_type: &str) -> String {
+    format!("{prefix}/chain/{chain_id}/security-zone/{security_zone}/{object_type}")
+}
+
+/// Fetch the ciphertext from the first prefix that holds it, newest first, and
+/// return that prefix: the proof was written next to the ciphertext, so it is
+/// read from the same one.
 async fn fetch_ciphertext(
     storage: &Storage,
     parent: &str,
     ct_hash: &str,
     chain_id: u32,
     security_zone: u8,
-) -> Result<StoredCiphertext, String> {
-    // Build base path: cofhe/v1/chain/{chain_id}/security-zone/{zone}/verified-inputs
-    let base_path =
-        format!("cofhe/v1/chain/{}/security-zone/{}/verified-inputs", chain_id, security_zone);
-    let object_path = generate_object_key(ct_hash, &Some(base_path), None);
+) -> Result<(StoredCiphertext, &'static str), String> {
+    let mut failures = Vec::with_capacity(STORAGE_PREFIXES.len());
+    for prefix in STORAGE_PREFIXES {
+        let base_path = storage_base_path(prefix, chain_id, security_zone, "verified-inputs");
+        let object_path = generate_object_key(ct_hash, &Some(base_path), None);
 
-    info!("Fetching CT from path: {}", object_path);
+        info!("Fetching CT from path: {}", object_path);
 
-    let data = read_object_bytes(storage, parent, &object_path).await?;
-
-    StoredCiphertext::from_bytes(&data)
-        .map_err(|e| format!("Failed to deserialize StoredCiphertext: {}", e))
+        match read_object_bytes(storage, parent, &object_path).await {
+            Ok(data) => {
+                let stored_ct = StoredCiphertext::from_bytes(&data)
+                    .map_err(|e| format!("Failed to deserialize StoredCiphertext: {}", e))?;
+                return Ok((stored_ct, prefix));
+            }
+            Err(e) => failures.push(e),
+        }
+    }
+    Err(format!("not found under any storage prefix: {}", failures.join("; ")))
 }
 
 async fn fetch_proof(
@@ -881,10 +901,9 @@ async fn fetch_proof(
     proof_id: &str,
     chain_id: u32,
     security_zone: u8,
+    prefix: &str,
 ) -> Result<StoredProof, String> {
-    // Build base path: cofhe/v1/chain/{chain_id}/security-zone/{zone}/verification-proofs
-    let base_path =
-        format!("cofhe/v1/chain/{}/security-zone/{}/verification-proofs", chain_id, security_zone);
+    let base_path = storage_base_path(prefix, chain_id, security_zone, "verification-proofs");
     let object_path = generate_object_key(proof_id, &Some(base_path), None);
 
     debug!("Fetching proof from path: {}", object_path);
@@ -1015,5 +1034,24 @@ mod tests {
         let back = StoredProof::from_bytes(&bincode::serialize(&previous).unwrap()).unwrap();
         assert_eq!(back.proof_data, vec![9, 8, 7]);
         assert_eq!(back.metadata.contract_addr, "");
+    }
+
+    /// The tool looks under the current prefix first and the previous one
+    /// second, so inputs written before the bump stay auditable.
+    #[test]
+    fn storage_prefixes_are_newest_first() {
+        assert_eq!(STORAGE_PREFIXES, ["cofhe/v2", "cofhe/v1"]);
+    }
+
+    #[test]
+    fn storage_base_path_matches_the_verifier_layout() {
+        assert_eq!(
+            storage_base_path("cofhe/v2", 8453, 0, "verified-inputs"),
+            "cofhe/v2/chain/8453/security-zone/0/verified-inputs"
+        );
+        assert_eq!(
+            storage_base_path("cofhe/v1", 11155111, 1, "verification-proofs"),
+            "cofhe/v1/chain/11155111/security-zone/1/verification-proofs"
+        );
     }
 }

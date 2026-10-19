@@ -424,7 +424,7 @@ mod tests {
             .expect("GcsStorage::new should succeed against fake-gcs-server");
 
         let key = "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb";
-        let base = "cofhe/v1/chain/8453/security-zone/0/verified-inputs";
+        let base = "cofhe/v2/chain/8453/security-zone/0/verified-inputs";
         let payload = b"hello-zk-verifier-migration";
 
         let mut meta = HashMap::new();
@@ -478,7 +478,7 @@ mod tests {
         let storage = GcsStorage::new(&cfg).await.expect("GcsStorage::new");
 
         let key = "cafef00d11112222333344445555666677778888999900001111222233334444";
-        let base = "cofhe/v1/chain/8453/security-zone/0/verification-proofs";
+        let base = "cofhe/v2/chain/8453/security-zone/0/verification-proofs";
         let payload = b"read-path-smoke";
         storage.upload(key, payload, None, Some(base), None).await.expect("upload");
 
@@ -515,28 +515,28 @@ mod tests {
 
     #[test]
     fn test_object_key_with_new_path_format() {
-        // Test with new path format: cofhe/v1/chain/{chain_id}/security-zone/{zone}/verified-inputs
+        // Test with new path format: cofhe/v2/chain/{chain_id}/security-zone/{zone}/verified-inputs
         // Sharding is HARDCODED to 4 characters
-        let base_path = "cofhe/v1/chain/11155111/security-zone/0/verified-inputs";
+        let base_path = "cofhe/v2/chain/11155111/security-zone/0/verified-inputs";
         assert_eq!(
             generate_object_key(
                 "a1b2c3d4e5f6789012345678901234567890123456789012345678901234",
                 &Some(base_path.to_string()),
                 None,
             ),
-            "cofhe/v1/chain/11155111/security-zone/0/verified-inputs/a1b2/\
+            "cofhe/v2/chain/11155111/security-zone/0/verified-inputs/a1b2/\
              a1b2c3d4e5f6789012345678901234567890123456789012345678901234"
         );
 
         // Test with verification-proofs
-        let proof_base_path = "cofhe/v1/chain/8453/security-zone/1/verification-proofs";
+        let proof_base_path = "cofhe/v2/chain/8453/security-zone/1/verification-proofs";
         assert_eq!(
             generate_object_key(
                 "0xff44239487234jh234iuh234",
                 &Some(proof_base_path.to_string()),
                 None,
             ),
-            "cofhe/v1/chain/8453/security-zone/1/verification-proofs/ff44/ff44239487234jh234iuh234"
+            "cofhe/v2/chain/8453/security-zone/1/verification-proofs/ff44/ff44239487234jh234iuh234"
         );
     }
 }

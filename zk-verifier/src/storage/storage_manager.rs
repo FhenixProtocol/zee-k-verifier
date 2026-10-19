@@ -11,8 +11,11 @@ use super::StorageProvider;
 use crate::config::RetryConfig;
 use crate::storage::types::{CtMetadata, ProofMetadata, StoredCiphertext, StoredProof};
 
-// Base paths for organizing CTs and proofs in storage
-const COFHE_VERSION: &str = "cofhe/v1";
+// Base paths for organizing CTs and proofs in storage.
+// Bumped from v1 together with the contract-bound proof metadata, so every
+// object under v2 was verified against the new layout. Objects under v1 are
+// never rewritten; `verify-stored-ct` reads both prefixes, newest first.
+const COFHE_VERSION: &str = "cofhe/v2";
 
 // Bounded label values. Kept separate from the human-readable operation name,
 // which embeds the ct hash — using that as a label would be one series per
@@ -43,7 +46,7 @@ impl StorageManager {
     }
 
     /// Build base path for storage objects
-    /// Format: cofhe/v0/chain/{chain_id}/security-zone/{security_zone}/{type}
+    /// Format: {COFHE_VERSION}/chain/{chain_id}/security-zone/{security_zone}/{type}
     fn build_base_path(chain_id: u32, security_zone: u8, object_type: &str) -> String {
         format!(
             "{}/chain/{}/security-zone/{}/{}",
@@ -407,6 +410,19 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    /// Every object the verifier writes sits under the current prefix.
+    #[test]
+    fn base_path_is_written_under_cofhe_v2() {
+        assert_eq!(
+            StorageManager::build_base_path(8453, 0, "verified-inputs"),
+            "cofhe/v2/chain/8453/security-zone/0/verified-inputs"
+        );
+        assert_eq!(
+            StorageManager::build_base_path(11155111, 1, "verification-proofs"),
+            "cofhe/v2/chain/11155111/security-zone/1/verification-proofs"
+        );
     }
 
     #[tokio::test]
