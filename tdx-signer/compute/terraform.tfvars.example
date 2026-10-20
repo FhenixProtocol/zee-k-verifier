@@ -116,26 +116,24 @@ gke_pod_cidr = "10.100.0.0/16"
 
 # ── PSC (Confidential Space → GKE ct-server:9451) ────────────────────────────
 #
-# Terraform creates the full PSC path once you provide the ILB forwarding rule name.
-# Prerequisites: the ct-server-ilb k8s Service must exist and have an EXTERNAL-IP.
+# Terraform creates the consumer side of the PSC path once you provide the URL of
+# ct-server's write-port service attachment, which the cofhe generator publishes
+# in the cluster (ServiceAttachment ct-server-ct-server-ilb).
 #
-# Step 1 — get the ILB forwarding rule name:
+# Step 1 — get the attachment URL:
 #
-#   gcloud compute forwarding-rules list --regions=<psc_region> \
-#     --project=<compute_project_id> --format="table(name,IPAddress)" | grep <ct-server-ilb EXTERNAL-IP>
+#   kubectl get serviceattachment ct-server-ct-server-ilb -n <namespace> \
+#     -o jsonpath='{.status.serviceAttachmentURL}'
 #
 # Step 2 — fill in the values below and run terraform apply.
-#          Terraform will create: PSC NAT subnet, service attachment, consumer subnet,
-#          consumer endpoint. The VM receives the endpoint IP as GKE_SERVICE_HOST.
+#          Terraform will create: consumer subnet, reserved IP, consumer endpoint.
 #
-# enable_psc              = true
-# psc_region              = "europe-west1"        # must match the GKE cluster region
-# gke_network             = "my-gke-vpc"
-# gke_ilb_forwarding_rule = "<name from step 1>"
-# psc_endpoint_port       = 9451
+# enable_psc                   = true
+# psc_region                   = "europe-west1"   # region of the attachment
+# ct_server_service_attachment = "<URL from step 1>"
+# psc_endpoint_port            = 9451
 #
-# # Optional — override default CIDRs if they conflict with existing subnets:
-# # psc_nat_subnet_cidr      = "10.0.128.0/29"   # created in the GKE VPC
+# # Optional — override the default CIDR if it conflicts with an existing subnet:
 # # psc_consumer_subnet_cidr = "10.0.2.0/29"     # created in the Confidential Space VPC
 #
 # # Optional — enable private DNS instead of using the endpoint IP directly:
