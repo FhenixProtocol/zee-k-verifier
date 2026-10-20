@@ -254,7 +254,7 @@ variable "enable_psc" {
 variable "ct_server_service_attachment" {
   type        = string
   default     = ""
-  description = "URL of ct-server's write-port PSC service attachment, published by the cofhe generator. Required when enable_psc = true; this project must be on its allow list. Get it with: kubectl get serviceattachment ct-server-ct-server-ilb -n <namespace> -o jsonpath='{.status.serviceAttachmentURL}'"
+  description = "URL of ct-server's write-port PSC service attachment, published by the cofhe generator. Required when enable_psc = true; this project must be on its allow list. GCP cannot retarget a PSC endpoint, so apply a new value with -replace='google_compute_forwarding_rule.psc_endpoint[0]' (the reserved IP stays). Get it with: kubectl get serviceattachment ct-server-ct-server-ilb -n <namespace> -o jsonpath='{.status.serviceAttachmentURL}'"
 
   validation {
     condition     = var.ct_server_service_attachment == "" || can(regex("projects/[^/]+/regions/[^/]+/serviceAttachments/[^/]+$", var.ct_server_service_attachment))
