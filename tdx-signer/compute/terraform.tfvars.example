@@ -131,7 +131,6 @@ gke_pod_cidr = "10.100.0.0/16"
 # enable_psc                   = true
 # psc_region                   = "europe-west1"   # region of the attachment
 # ct_server_service_attachment = "<URL from step 1>"
-# psc_endpoint_port            = 9451
 #
 # # Optional — override the default CIDR if it conflicts with an existing subnet:
 # # psc_consumer_subnet_cidr = "10.0.2.0/29"     # created in the Confidential Space VPC

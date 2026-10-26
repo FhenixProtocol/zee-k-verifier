@@ -274,16 +274,10 @@ variable "psc_region" {
   description = "Region of the PSC consumer endpoint. Must equal the region of ct_server_service_attachment (the GKE cluster region). Defaults to var.region when empty."
 }
 
-variable "psc_endpoint_port" {
-  type        = number
-  default     = 8080
-  description = "Port the GKE service listens on. Passed to the workload as tee-env-GKE_SERVICE_PORT."
-}
-
 variable "enable_psc_dns" {
   type        = bool
   default     = false
-  description = "When true, create a private Cloud DNS zone and A record resolving psc_dns_zone to the PSC endpoint IP. When false, tee-env-GKE_SERVICE_HOST is set to the endpoint IP directly."
+  description = "When true, create a private Cloud DNS zone and A record resolving psc_dns_zone to the PSC endpoint IP. The workload's endpoint comes only from store_cts_endpoint either way."
 }
 
 variable "psc_dns_zone" {

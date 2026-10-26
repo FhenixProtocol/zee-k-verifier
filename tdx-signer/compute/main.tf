@@ -342,6 +342,11 @@ resource "google_compute_forwarding_rule" "psc_endpoint" {
       condition     = can(regex("/regions/${local.psc_region}/serviceAttachments/", var.ct_server_service_attachment))
       error_message = "ct_server_service_attachment must be set when enable_psc = true, and its region must equal psc_region."
     }
+    # A project missing from the attachment's allow list still applies cleanly but stays PENDING, and /StoreCts is down.
+    postcondition {
+      condition     = self.psc_connection_status == "ACCEPTED"
+      error_message = "PSC endpoint is ${self.psc_connection_status}, not ACCEPTED: add this project to the attachment's consumer allow list."
+    }
   }
 }
 
