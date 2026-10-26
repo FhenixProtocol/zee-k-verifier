@@ -301,43 +301,9 @@ resource "google_compute_firewall" "allow_health_checks" {
 }
 
 # --- PSC (Confidential Space → GKE ct-server:9451) ----------------------
-# Producer side (GKE VPC): PSC NAT subnet + service attachment.
-# Consumer side (CS VPC):  reserved IP + forwarding rule + private DNS.
-
-resource "google_compute_subnetwork" "psc_nat" {
-  count         = var.enable_psc ? 1 : 0
-  name          = "ct-server-psc-nat"
-  region        = local.psc_region
-  network       = var.gke_network
-  ip_cidr_range = var.psc_nat_subnet_cidr
-  purpose       = "PRIVATE_SERVICE_CONNECT"
-  depends_on    = [google_project_service.apis]
-
-  lifecycle {
-    precondition {
-      condition     = var.gke_network != ""
-      error_message = "gke_network must be set when enable_psc = true."
-    }
-  }
-}
-
-resource "google_compute_service_attachment" "ct_server" {
-  count                 = var.enable_psc ? 1 : 0
-  name                  = "ct-server-attachment"
-  region                = local.psc_region
-  enable_proxy_protocol = false
-  connection_preference = "ACCEPT_AUTOMATIC"
-  nat_subnets           = [google_compute_subnetwork.psc_nat[0].self_link]
-  target_service        = "https://www.googleapis.com/compute/v1/projects/${var.compute_project_id}/regions/${local.psc_region}/forwardingRules/${var.gke_ilb_forwarding_rule}"
-  depends_on            = [google_project_service.apis]
-
-  lifecycle {
-    precondition {
-      condition     = var.gke_ilb_forwarding_rule != ""
-      error_message = "gke_ilb_forwarding_rule must be set when enable_psc = true."
-    }
-  }
-}
+# Consumer side only: reserved IP + forwarding rule + private DNS. The producer
+# (service attachment + NAT subnet) is published by the cluster, so this module
+# never touches the GKE VPC.
 
 resource "google_compute_subnetwork" "psc_consumer" {
   count         = var.enable_psc ? 1 : 0
@@ -364,12 +330,24 @@ resource "google_compute_forwarding_rule" "psc_endpoint" {
   network               = local.network
   subnetwork            = google_compute_subnetwork.psc_consumer[0].self_link
   ip_address            = google_compute_address.psc_endpoint[0].id
-  target                = google_compute_service_attachment.ct_server[0].self_link
+  target                = var.ct_server_service_attachment
   load_balancing_scheme = ""
   # Required: the Confidential Space VM is in europe-west4 but the PSC endpoint
   # is in europe-west1. Without this, PSC only accepts traffic from the same region.
   allow_psc_global_access = true
   depends_on              = [google_project_service.apis]
+
+  lifecycle {
+    precondition {
+      condition     = can(regex("/regions/${local.psc_region}/serviceAttachments/", var.ct_server_service_attachment))
+      error_message = "ct_server_service_attachment must be set when enable_psc = true, and its region must equal psc_region."
+    }
+    # A project missing from the attachment's allow list still applies cleanly but stays PENDING, and /StoreCts is down.
+    postcondition {
+      condition     = self.psc_connection_status == "ACCEPTED"
+      error_message = "PSC endpoint is ${self.psc_connection_status}, not ACCEPTED: add this project to the attachment's consumer allow list."
+    }
+  }
 }
 
 resource "google_dns_managed_zone" "psc" {
