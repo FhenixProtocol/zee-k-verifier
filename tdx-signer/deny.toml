@@ -13,7 +13,9 @@ yanked = "warn"
 # unmaintained crates from the tfhe / google-cloud / alloy trees are out of our
 # control and would block CI without giving us anywhere to fix them.
 unmaintained = "workspace"
-ignore = []
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 via k256 0.13; fixed by the k256 0.14 migration" },
+]
 
 [licenses]
 version = 2
