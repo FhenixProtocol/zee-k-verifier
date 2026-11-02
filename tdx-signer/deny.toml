@@ -13,7 +13,12 @@ yanked = "warn"
 # unmaintained crates from the tfhe / google-cloud / alloy trees are out of our
 # control and would block CI without giving us anywhere to fix them.
 unmaintained = "workspace"
-ignore = []
+ignore = [
+    # crypto-bigint < 0.7.6 timing variability. 0.5.5 is forced by elliptic-curve
+    # 0.13 (k256, and vsss-rs inside cofhe-keys); k256 scalars on the zk_signer signing
+    # path use it. 0.6.1 is lock-only. The fix needs k256 0.14, so revisit on that bump.
+    "RUSTSEC-2026-0387",
+]
 
 [licenses]
 version = 2
