@@ -601,7 +601,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 [[package]]
 name = "cofhe-keys"
 version = "0.1.0"
-source = "git+https://github.com/FhenixProtocol/cofhe-tdx-keygen.git?rev=896f6bee7480cec3863c57c68fbae5f21de2861e#896f6bee7480cec3863c57c68fbae5f21de2861e"
+source = "git+https://github.com/FhenixProtocol/cofhe-tdx-keygen.git?rev=4a816b9090ded5ef8f6be75cb067fc7c20c7a9dc#4a816b9090ded5ef8f6be75cb067fc7c20c7a9dc"
 dependencies = [
  "anyhow",
  "base64",
