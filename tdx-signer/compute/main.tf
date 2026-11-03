@@ -473,9 +473,13 @@ resource "google_compute_instance_template" "zee_k_verifier" {
 # --- Managed Instance Group ---------------------------------------------
 # PROACTIVE: the apply that changes the template is the roll. The MIG replaces
 # the VMs one at a time, and the health check below gates each step. Partners
-# re-pin the new digest before that apply. Wait for the roll with:
-#   gcloud compute instance-groups managed wait-until --stable zee-k-verifier-mig --zone=<zone>
-# `rolling-action replace` only restarts the same template. It also sets PROACTIVE,
+# re-pin the new digest before that apply. Wait for the roll with two waits, in this
+# order (--stable alone can pass while an old-template VM remains):
+#   gcloud compute instance-groups managed wait-until --version-target-reached zee-k-verifier-mig --zone=<zone> --project=<project>
+#   gcloud compute instance-groups managed wait-until --stable zee-k-verifier-mig --zone=<zone> --project=<project>
+# `rolling-action replace` only restarts the same template. Always pass
+# `--max-surge=1 --max-unavailable=0`: gcloud's defaults override the MIG policy
+# and can take the only VM offline. It also sets PROACTIVE,
 # so it no longer drifts from this code.
 # REPLACE (not RESTART/REFRESH): a Confidential VM's boot image can't change
 # in place, so the instance is recreated — which also forces fresh attestation.
