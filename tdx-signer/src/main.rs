@@ -46,6 +46,7 @@ use anyhow::{Context, Result};
 use cofhe_keys::reader::{PartnerAccess, PartnerRef};
 use cofhe_keys::serialization::verify_artifact;
 use k256::ecdsa::SigningKey;
+use std::num::NonZeroU64;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -153,10 +154,13 @@ struct Config {
     /// GCS bucket holding the public material (the digests reconstruction is
     /// validated against). From the baked triplet, not env.
     public_bucket: String,
-    /// Public-material object name within `public_bucket` (baked, not env). The
-    /// FHE artifacts are fetched as siblings of this object; the manifest at it
-    /// carries their digests.
+    /// Public-material manifest within `public_bucket`: the baked
+    /// `public-material.v{share_version}`, not env. The FHE artifacts are fetched
+    /// as siblings of this object; the manifest at it carries their digests.
     public_object: String,
+    /// The exact Secret Manager version every partner holds its share at (baked).
+    /// The reader never reads `latest`.
+    share_version: NonZeroU64,
     /// The ct-server endpoint the verifier writes stored cts to. The ONE
     /// operator-supplied endpoint (`STORE_CTS_ENDPOINT`), mirroring teecryptor's
     /// `CT_SOURCE_URL`; injected into the baked zk-verifier config at boot.
@@ -202,7 +206,8 @@ impl Config {
             partners,
             threshold,
             public_bucket: baked.public_bucket.to_string(),
-            public_object: baked.public_object.to_string(),
+            public_object: baked.manifest_object(),
+            share_version: baked.share_version,
             store_cts_endpoint: env("STORE_CTS_ENDPOINT")?,
         })
     }
@@ -260,7 +265,7 @@ async fn reconstruct_signer(
         public_object: &cfg.public_object,
     };
 
-    let zk_signer_secret = read_zk_signer(&ctx, &accesses, cfg.threshold)
+    let zk_signer_secret = read_zk_signer(&ctx, &accesses, cfg.threshold, &|_| cfg.share_version)
         .await
         .context("reconstruct zk-signer across partners")?;
     let signer_pk = key_source::assemble(zk_signer_secret)?;
@@ -506,8 +511,9 @@ mod tests {
         assert_eq!(cfg.public_bucket, "fhenix-testnet-v2");
         assert_eq!(
             cfg.public_object,
-            "generator/keys/versionized/0/public-material"
+            "generator/keys/versionized/0/public-material.v1"
         );
+        assert_eq!(cfg.share_version.get(), 1);
         // The one operator-supplied endpoint is captured verbatim.
         assert_eq!(cfg.store_cts_endpoint, "https://ct.example.test");
     }
