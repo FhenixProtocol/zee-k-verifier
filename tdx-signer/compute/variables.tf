@@ -248,25 +248,18 @@ variable "armor_rate_limit_ban_duration_sec" {
 variable "enable_psc" {
   type        = bool
   default     = false
-  description = "When true, Terraform creates the full PSC path: NAT subnet, service attachment (producer), and consumer endpoint + DNS in the Confidential Space VPC."
+  description = "When true, Terraform creates the PSC consumer path in the Confidential Space VPC: reserved IP, endpoint to ct_server_service_attachment, and DNS."
 }
 
-variable "gke_network" {
+variable "ct_server_service_attachment" {
   type        = string
   default     = ""
-  description = "Name of the GKE VPC network. Used to create the PSC NAT subnet on the producer side. Required when enable_psc = true."
-}
+  description = "URL of ct-server's write-port PSC service attachment, published by the cofhe generator. Required when enable_psc = true; this project must be on its allow list. GCP cannot retarget a PSC endpoint, so apply a new value with -replace='google_compute_forwarding_rule.psc_endpoint[0]' (the reserved IP stays). Get it with: kubectl get serviceattachment ct-server-ct-server-ilb -n <namespace> -o jsonpath='{.status.serviceAttachmentURL}'"
 
-variable "gke_ilb_forwarding_rule" {
-  type        = string
-  default     = ""
-  description = "Name of the internal LB forwarding rule created by the ct-server-ilb k8s Service. Required when enable_psc = true. Find it with: gcloud compute forwarding-rules list --regions=<psc_region> --project=<project>"
-}
-
-variable "psc_nat_subnet_cidr" {
-  type        = string
-  default     = "10.0.128.0/29"
-  description = "CIDR for the PSC NAT subnet created in the GKE VPC. Must not overlap with existing subnets."
+  validation {
+    condition     = var.ct_server_service_attachment == "" || can(regex("projects/[^/]+/regions/[^/]+/serviceAttachments/[^/]+$", var.ct_server_service_attachment))
+    error_message = "ct_server_service_attachment must be a service attachment URL (.../projects/P/regions/R/serviceAttachments/NAME)."
+  }
 }
 
 variable "psc_consumer_subnet_cidr" {
@@ -278,19 +271,13 @@ variable "psc_consumer_subnet_cidr" {
 variable "psc_region" {
   type        = string
   default     = ""
-  description = "Region for all PSC resources (NAT subnet, service attachment, consumer endpoint). Must match the GKE cluster region. Defaults to var.region when empty."
-}
-
-variable "psc_endpoint_port" {
-  type        = number
-  default     = 8080
-  description = "Port the GKE service listens on. Passed to the workload as tee-env-GKE_SERVICE_PORT."
+  description = "Region of the PSC consumer endpoint. Must equal the region of ct_server_service_attachment (the GKE cluster region). Defaults to var.region when empty."
 }
 
 variable "enable_psc_dns" {
   type        = bool
   default     = false
-  description = "When true, create a private Cloud DNS zone and A record resolving psc_dns_zone to the PSC endpoint IP. When false, tee-env-GKE_SERVICE_HOST is set to the endpoint IP directly."
+  description = "When true, create a private Cloud DNS zone and A record resolving psc_dns_zone to the PSC endpoint IP. The workload's endpoint comes only from store_cts_endpoint either way."
 }
 
 variable "psc_dns_zone" {
