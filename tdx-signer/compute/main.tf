@@ -471,12 +471,16 @@ resource "google_compute_instance_template" "zee_k_verifier" {
 }
 
 # --- Managed Instance Group ---------------------------------------------
-# Updates are MANUAL by design. OPPORTUNISTIC means the MIG never rolls a
-# running instance on its own: bumping image_digest and `terraform apply`
-# only re-points the template — the live VM keeps the old image until an
-# operator explicitly rolls it:
-#   gcloud compute instance-groups managed rolling-action replace zee-k-verifier-mig \
-#     --zone=<zone> --max-surge=1 --max-unavailable=0
+# PROACTIVE: the apply that changes the template is the roll. The MIG replaces
+# the VMs one at a time, and the health check below gates each step. Partners
+# re-pin the new digest before that apply. Wait for the roll with two waits, in this
+# order (--stable alone can pass while an old-template VM remains):
+#   gcloud compute instance-groups managed wait-until --version-target-reached zee-k-verifier-mig --zone=<zone> --project=<project>
+#   gcloud compute instance-groups managed wait-until --stable zee-k-verifier-mig --zone=<zone> --project=<project>
+# `rolling-action replace` only restarts the same template. Always pass
+# `--max-surge=1 --max-unavailable=0`: gcloud's defaults override the MIG policy
+# and can take the only VM offline. It also sets PROACTIVE,
+# so it no longer drifts from this code.
 # REPLACE (not RESTART/REFRESH): a Confidential VM's boot image can't change
 # in place, so the instance is recreated — which also forces fresh attestation.
 resource "google_compute_instance_group_manager" "zee_k_verifier" {
@@ -491,14 +495,14 @@ resource "google_compute_instance_group_manager" "zee_k_verifier" {
   target_size = var.mig_target_size
 
   update_policy {
-    type                  = "OPPORTUNISTIC"
+    type                  = "PROACTIVE"
     minimal_action        = "REPLACE"
     max_surge_fixed       = 1
     max_unavailable_fixed = 0
   }
 
   # Health-gate rolling updates and autoheal dead instances. Combined with
-  # max_unavailable=0 above, a `rolling-action replace` now waits for the new
+  # max_unavailable=0 above, each roll step waits for the new
   # instance to PASS this health check before deleting the old one — automatic
   # zero-downtime rolls, no manual surge/verify/drop. initial_delay_sec must
   # exceed worst-case boot: VM start + TDX attestation + Secret Manager key
