@@ -323,6 +323,14 @@ resource "google_compute_address" "psc_endpoint" {
   depends_on   = [google_project_service.apis]
 }
 
+# GCP cannot move a PSC endpoint to another attachment, but the provider plans a
+# new target as an in-place update. This record makes a later target change replace
+# the endpoint. Its first create triggers nothing, so the first rollout needs -replace.
+resource "terraform_data" "psc_target" {
+  count = var.enable_psc ? 1 : 0
+  input = var.ct_server_service_attachment
+}
+
 resource "google_compute_forwarding_rule" "psc_endpoint" {
   count                 = var.enable_psc ? 1 : 0
   name                  = "zee-k-verifier-psc-endpoint"
@@ -338,6 +346,7 @@ resource "google_compute_forwarding_rule" "psc_endpoint" {
   depends_on              = [google_project_service.apis]
 
   lifecycle {
+    replace_triggered_by = [terraform_data.psc_target]
     precondition {
       condition     = can(regex("/regions/${local.psc_region}/serviceAttachments/", var.ct_server_service_attachment))
       error_message = "ct_server_service_attachment must be set when enable_psc = true, and its region must equal psc_region."
