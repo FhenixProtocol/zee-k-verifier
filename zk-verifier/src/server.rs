@@ -578,4 +578,178 @@ mod tests {
             StatusCode::BAD_REQUEST
         }
     }
+
+    /// `POST /verifyBatch` as `@cofhe/sdk` calls it (`zkVerifyBatch` in
+    /// `core/encrypt/zkPackProveVerify.ts`). The SDK depends on these shapes, so
+    /// a change here breaks every dApp encrypt.
+    mod sdk_contract {
+        use std::sync::OnceLock;
+
+        use serde_json::json;
+        use tfhe::FheTypes;
+
+        use super::*;
+
+        const ACCOUNT_ADDR: &str = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4";
+        const CONTRACT_ADDR: &str = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+        const OTHER_CONTRACT_ADDR: &str = "0x00000000000000000000000000000000000000aa";
+        const SECURITY_ZONE: u8 = 0;
+        const ARB_SEPOLIA_CHAIN_ID: u32 = 421_614;
+        const SIGNATURE_BYTES: usize = 64;
+        const CT_HASH_BYTES: usize = 32;
+
+        struct Keys {
+            crs: CompactPkeCrs,
+            server_key: ServerKey,
+            public_key: CompactPublicKey,
+            /// Hex of a proof over one `u8` then one `u64`, bound to the SDK metadata.
+            packed_list: String,
+        }
+
+        /// Key generation and proving dominate test time, so all tests share one set.
+        fn keys() -> &'static Keys {
+            static KEYS: OnceLock<Keys> = OnceLock::new();
+            KEYS.get_or_init(|| {
+                let (crs, server_key, public_key) = setup_tfhers();
+                let proven_list = ProvenCompactCiphertextList::builder(&public_key)
+                    .push(7u8)
+                    .push(42u64)
+                    .build_with_proof_packed(
+                        &crs,
+                        &sdk_zk_pok_metadata(),
+                        tfhe::zk::ZkComputeLoad::Verify,
+                    )
+                    .unwrap();
+                let packed_list =
+                    hex::encode(rust_common::safe_serde::serialize(&proven_list).unwrap());
+                Keys { crs, server_key, public_key, packed_list }
+            })
+        }
+
+        /// Built independently of `Verifier::reconstruct_metadata`, byte for byte
+        /// as the SDK's `constructZkPoKMetadata` does, so a server-side layout
+        /// change fails here: `sz (1) || account (20) || chain_id (32, BE) || contract (20)`.
+        fn sdk_zk_pok_metadata() -> Vec<u8> {
+            let mut chain_id = [0u8; 32];
+            chain_id[28..].copy_from_slice(&ARB_SEPOLIA_CHAIN_ID.to_be_bytes());
+            let mut metadata = vec![SECURITY_ZONE];
+            metadata.extend(hex::decode(&ACCOUNT_ADDR[2..]).unwrap());
+            metadata.extend(chain_id);
+            metadata.extend(hex::decode(&CONTRACT_ADDR[2..]).unwrap());
+            metadata
+        }
+
+        /// Exactly the body the SDK sends: `packed_list` is unprefixed lowercase
+        /// hex, the addresses are passed through as the caller spelled them.
+        fn sdk_request(contract_address: &str) -> Value {
+            json!({
+                "packed_list": keys().packed_list,
+                "account_addr": ACCOUNT_ADDR,
+                "security_zone": SECURITY_ZONE,
+                "chain_id": ARB_SEPOLIA_CHAIN_ID,
+                "contract_address": contract_address,
+            })
+        }
+
+        async fn post_verify_batch(body: String) -> Response {
+            #[cfg(feature = "store-cts")]
+            let (endpoint, _shutdown_on_drop) = setup_mock_cts_server().await;
+            #[cfg(not(feature = "store-cts"))]
+            let endpoint = String::new();
+
+            let keys = keys();
+            let signer = Signer::from_bytes(&[1u8; 32]).unwrap();
+            let verifier = Verifier::new(keys.crs.clone(), keys.public_key.clone(), signer);
+            let state = test_state(verifier, keys.server_key.clone(), endpoint, 1, 8);
+
+            let request = Request::builder()
+                .method("POST")
+                .uri("/verifyBatch")
+                .header("Content-Type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            ServiceExt::oneshot(api::create_router().with_state(state), request).await.unwrap()
+        }
+
+        async fn sdk_success_body() -> Value {
+            let response = post_verify_batch(sdk_request(CONTRACT_ADDR).to_string()).await;
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
+        fn is_0x_hex_of_len(value: &Value, bytes: usize) -> bool {
+            value.as_str().and_then(|s| s.strip_prefix("0x")).is_some_and(|digits| {
+                digits.len() == bytes * 2 && digits.bytes().all(|b| b.is_ascii_hexdigit())
+            })
+        }
+
+        #[tokio::test]
+        async fn sdk_shaped_request_is_verified() {
+            let response = post_verify_batch(sdk_request(CONTRACT_ADDR).to_string()).await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        #[tokio::test]
+        async fn success_status_field_is_success() {
+            assert_eq!(sdk_success_body().await["status"], "success");
+        }
+
+        /// The SDK feeds each `ct_hash` to `BigInt()` and uses it as the on-chain handle.
+        #[tokio::test]
+        async fn success_ct_hashes_are_0x_prefixed_32_byte_hex() {
+            let body = sdk_success_body().await;
+            let ciphertexts = body["data"]["ciphertexts"].as_array().unwrap();
+            assert!(ciphertexts.iter().all(|ct| is_0x_hex_of_len(&ct["ct_hash"], CT_HASH_BYTES)));
+        }
+
+        /// The SDK pairs `ciphertexts[i]` with its i-th input by position.
+        #[tokio::test]
+        async fn success_ciphertexts_follow_submission_order() {
+            let body = sdk_success_body().await;
+            let ct_types: Vec<&Value> = body["data"]["ciphertexts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|ct| &ct["ct_type"])
+                .collect();
+            assert_eq!(ct_types, [&json!(FheTypes::Uint8 as u8), &json!(FheTypes::Uint64 as u8)]);
+        }
+
+        /// The SDK appends `recid + 27` as one hex byte, so this must be r || s alone.
+        #[tokio::test]
+        async fn success_signature_is_0x_prefixed_64_byte_hex() {
+            let body = sdk_success_body().await;
+            assert!(is_0x_hex_of_len(&body["data"]["signature"], SIGNATURE_BYTES));
+        }
+
+        /// `recid + 27` must land on an EVM `v` of 27 or 28.
+        #[tokio::test]
+        async fn success_recid_is_0_or_1() {
+            let body = sdk_success_body().await;
+            assert!(matches!(body["data"]["recid"].as_u64(), Some(0 | 1)));
+        }
+
+        #[tokio::test]
+        async fn non_hex_packed_list_is_rejected_with_422() {
+            let mut body = sdk_request(CONTRACT_ADDR);
+            body["packed_list"] = json!("not-hex");
+            let response = post_verify_batch(body.to_string()).await;
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        }
+
+        /// What an SDK release that predates `contract_address` sends.
+        #[tokio::test]
+        async fn request_without_contract_address_is_rejected_with_422() {
+            let mut body = sdk_request(CONTRACT_ADDR);
+            body.as_object_mut().unwrap().remove("contract_address");
+            let response = post_verify_batch(body.to_string()).await;
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        }
+
+        #[tokio::test]
+        async fn proof_bound_to_another_contract_is_rejected_with_400() {
+            let response = post_verify_batch(sdk_request(OTHER_CONTRACT_ADDR).to_string()).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+    }
 }
